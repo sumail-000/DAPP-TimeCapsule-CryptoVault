@@ -1,0 +1,46 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Hardhat files
+cache
+artifacts
+typechain
+typechain-types
+
+# Coverage directory
+coverage
+coverage.json
+
+SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/djNT8rHHwMM8vB0WBkTCZTrxq-lZ1SUo
+PRIVATE_KEY=0x5d3b004cdf3b6a1197d4a4529fd69188377e57a3f30b3813fda04bd0065fe047
+ETH_USD_PRICE_FEED=0x694AA1769357215DE4FAC081bf1f309aDC325306
