@@ -51,10 +51,64 @@ export const getWalletBalance = async (address: string, network: string): Promis
   return ethers.formatEther(balance);
 };
 
-export const sendTransaction = async (
+export interface GasEstimate {
+  gasPrice: bigint;
+  gasLimit: bigint;
+  gasCost: bigint;
+  gasCostEther: string;
+  maxAmount: string;
+}
+
+export const estimateGasFee = async (
   fromWallet: WalletData,
   toAddress: string,
   amount: string
+): Promise<GasEstimate> => {
+  const provider = new ethers.JsonRpcProvider(
+    SUPPORTED_NETWORKS.find((n: Network) => n.id === fromWallet.network)?.rpc
+  );
+  
+  const wallet = new ethers.Wallet(fromWallet.privateKey, provider);
+  const amountWei = ethers.parseEther(amount);
+  
+  // Get current gas price
+  const gasPrice = await provider.getFeeData();
+  const maxFeePerGas = gasPrice.maxFeePerGas || gasPrice.gasPrice;
+  
+  if (!maxFeePerGas) {
+    throw new Error("Could not get gas price");
+  }
+  
+  // Estimate gas limit for this transaction
+  const gasLimit = await provider.estimateGas({
+    from: fromWallet.address,
+    to: toAddress,
+    value: amountWei
+  });
+  
+  // Calculate total gas cost
+  const gasCost = gasLimit * maxFeePerGas;
+  const gasCostEther = ethers.formatEther(gasCost);
+  
+  // Calculate maximum amount that can be sent (balance - gas cost)
+  const balance = await provider.getBalance(fromWallet.address);
+  const maxSendableWei = balance - gasCost;
+  const maxAmount = maxSendableWei > 0n ? ethers.formatEther(maxSendableWei) : "0";
+  
+  return {
+    gasPrice: maxFeePerGas,
+    gasLimit,
+    gasCost,
+    gasCostEther,
+    maxAmount
+  };
+};
+
+export const sendTransaction = async (
+  fromWallet: WalletData,
+  toAddress: string,
+  amount: string,
+  useMaxAmount: boolean = false
 ): Promise<string> => {
   const provider = new ethers.JsonRpcProvider(
     SUPPORTED_NETWORKS.find((n: Network) => n.id === fromWallet.network)?.rpc
@@ -62,9 +116,19 @@ export const sendTransaction = async (
   
   const wallet = new ethers.Wallet(fromWallet.privateKey, provider);
   
+  // Get gas estimate
+  const gasEstimate = await estimateGasFee(fromWallet, toAddress, amount);
+  
+  // If useMaxAmount is true, send maximum possible amount after gas fees
+  const valueToSend = useMaxAmount 
+    ? ethers.parseEther(gasEstimate.maxAmount)
+    : ethers.parseEther(amount);
+  
   const tx = await wallet.sendTransaction({
     to: toAddress,
-    value: ethers.parseEther(amount),
+    value: valueToSend,
+    maxFeePerGas: gasEstimate.gasPrice,
+    gasLimit: gasEstimate.gasLimit
   });
   
   // Wait for transaction confirmation
@@ -75,8 +139,9 @@ export const sendTransaction = async (
     detail: {
       from: fromWallet.address,
       to: toAddress,
-      value: amount,
+      value: useMaxAmount ? gasEstimate.maxAmount : amount,
       hash: tx.hash,
+      gasCost: gasEstimate.gasCostEther
     },
   }));
   

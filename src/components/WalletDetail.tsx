@@ -51,13 +51,23 @@ import {
   InputGroup,
   InputRightElement,
   Code,
+  Switch,
+  Stat,
+  StatLabel,
+  StatNumber,
+  StatHelpText,
+  Skeleton,
+  Spinner,
+  Alert,
+  AlertIcon,
 } from '@chakra-ui/react';
 import { ethers } from 'ethers';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { FaCopy, FaEye, FaEyeSlash, FaQrcode, FaExchangeAlt, FaTrash, FaKey, FaEdit, FaDownload, FaInfoCircle, FaSync, FaCheck } from 'react-icons/fa';
+import { FaCopy, FaEye, FaEyeSlash, FaQrcode, FaExchangeAlt, FaTrash, FaKey, FaEdit, FaDownload, FaInfoCircle, FaSync, FaCheck, FaGasPump } from 'react-icons/fa';
 import { QRCodeSVG } from 'qrcode.react';
 import { SUPPORTED_NETWORKS, Network } from '../constants/networks';
+import { estimateGasFee, GasEstimate, sendTransaction } from '../utils/wallet';
 
 const MotionBox = motion.create(Box);
 
@@ -68,6 +78,10 @@ interface Transaction {
   value: string;
   timestamp: number;
   status: 'pending' | 'confirmed' | 'failed';
+  gasUsed?: string;
+  gasPrice?: string;
+  network: string;
+  blockNumber?: number;
 }
 
 interface WalletData {
@@ -88,6 +102,8 @@ export const WalletDetail = () => {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [showPrivateKey, setShowPrivateKey] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [gasEstimate, setGasEstimate] = useState<GasEstimate | null>(null);
+  const [isEstimatingGas, setIsEstimatingGas] = useState(false);
   const addressClipboard = useClipboard(wallet?.address || '');
   const privateKeyClipboard = useClipboard(wallet?.privateKey || '');
   const [savedWallets, setSavedWallets] = useState<WalletData[]>([]);
@@ -205,29 +221,214 @@ export const WalletDetail = () => {
     }
   };
 
-  const loadTransactions = async (walletAddress: string) => {
-    // This would normally fetch from a blockchain explorer API
-    // For now, we'll use mock data
-    const mockTransactions: Transaction[] = [
-      {
-        hash: '0x123abc456def789ghi',
-        from: walletAddress,
-        to: '0x456def789ghi123abc',
-        value: '0.1',
-        timestamp: Date.now() - 86400000, // 1 day ago
-        status: 'confirmed',
-      },
-      {
-        hash: '0x789ghi123abc456def',
-        from: '0x987zyx654wvu321tsr',
-        to: walletAddress,
-        value: '0.5',
-        timestamp: Date.now() - 172800000, // 2 days ago
-        status: 'confirmed',
+  // Load transactions from localStorage
+  const loadStoredTransactions = (walletAddress: string, networkId: string) => {
+    try {
+      const storedTxKey = `transactions_${walletAddress}_${networkId}`;
+      const storedTxData = localStorage.getItem(storedTxKey);
+      if (storedTxData) {
+        const parsedTx = JSON.parse(storedTxData);
+        if (Array.isArray(parsedTx)) {
+          return parsedTx;
+        }
       }
-    ];
-    setTransactions(mockTransactions);
+    } catch (error) {
+      console.error('Error loading stored transactions:', error);
+    }
+    return [];
   };
+
+  // Save transactions to localStorage
+  const saveTransactions = (walletAddress: string, networkId: string, txList: Transaction[]) => {
+    try {
+      const storedTxKey = `transactions_${walletAddress}_${networkId}`;
+      localStorage.setItem(storedTxKey, JSON.stringify(txList));
+    } catch (error) {
+      console.error('Error saving transactions:', error);
+    }
+  };
+
+  const loadTransactions = async (walletAddress: string) => {
+    if (!wallet) return;
+    
+    try {
+      // First load any stored transactions
+      const storedTransactions = loadStoredTransactions(walletAddress, wallet.network);
+      setTransactions(storedTransactions);
+      
+      // Then try to fetch from the blockchain
+      const network = SUPPORTED_NETWORKS.find(n => n.id === wallet.network);
+      if (!network) return;
+      
+      try {
+        // Connect to provider
+        const provider = new ethers.JsonRpcProvider(network.rpc);
+        
+        // Get the latest block number
+        const latestBlock = await provider.getBlockNumber();
+        
+        // Fetch the last 100 blocks for transactions
+        const fromBlock = Math.max(0, latestBlock - 100);
+        
+        // Get sent transactions
+        const sentTxs = await fetchWalletTransactions(provider, walletAddress, fromBlock, latestBlock, true);
+        
+        // Get received transactions
+        const receivedTxs = await fetchWalletTransactions(provider, walletAddress, fromBlock, latestBlock, false);
+        
+        // Combine and sort transactions
+        const allTxs = [...sentTxs, ...receivedTxs].sort((a, b) => b.timestamp - a.timestamp);
+        
+        // Merge with stored transactions, removing duplicates
+        const mergedTxs = mergeTransactions(storedTransactions, allTxs);
+        
+        // Update state and save to localStorage
+        setTransactions(mergedTxs);
+        saveTransactions(walletAddress, wallet.network, mergedTxs);
+      } catch (error) {
+        console.warn('Error fetching blockchain transactions, using stored data', error);
+      }
+    } catch (error) {
+      console.error('Error in loadTransactions:', error);
+      
+      // Fallback to mock data if everything fails
+      const mockTransactions: Transaction[] = [
+        {
+          hash: '0x123abc456def789ghi',
+          from: walletAddress,
+          to: '0x456def789ghi123abc',
+          value: '0.1',
+          timestamp: Date.now() - 86400000, // 1 day ago
+          status: 'confirmed',
+          network: wallet.network
+        },
+        {
+          hash: '0x789ghi123abc456def',
+          from: '0x987zyx654wvu321tsr',
+          to: walletAddress,
+          value: '0.5',
+          timestamp: Date.now() - 172800000, // 2 days ago
+          status: 'confirmed',
+          network: wallet.network
+        }
+      ];
+      setTransactions(mockTransactions);
+    }
+  };
+  
+  // Helper function to fetch transactions from the blockchain
+  const fetchWalletTransactions = async (
+    provider: ethers.JsonRpcProvider, 
+    address: string, 
+    fromBlock: number, 
+    toBlock: number, 
+    isSender: boolean
+  ): Promise<Transaction[]> => {
+    try {
+      // Create a filter for transactions
+      const filter = {
+        fromBlock,
+        toBlock,
+        address: isSender ? undefined : address, // For received transactions
+        topics: []
+      };
+      
+      // Get logs
+      const logs = await provider.getLogs(filter);
+      
+      // Process logs into transactions
+      const transactions: Transaction[] = [];
+      
+      for (const log of logs) {
+        if (log.transactionHash) {
+          try {
+            const tx = await provider.getTransaction(log.transactionHash);
+            const receipt = await provider.getTransactionReceipt(log.transactionHash);
+            
+            if (tx && 
+                ((isSender && tx.from.toLowerCase() === address.toLowerCase()) || 
+                (!isSender && tx.to?.toLowerCase() === address.toLowerCase()))) {
+              
+              const block = await provider.getBlock(tx.blockNumber || 0);
+              const gasPrice = tx.gasPrice || tx.maxFeePerGas || 0n;
+              
+              // Make sure wallet is not null
+              const currentNetwork = wallet?.network || 'ethereum';
+              
+              transactions.push({
+                hash: tx.hash,
+                from: tx.from,
+                to: tx.to || '',
+                value: ethers.formatEther(tx.value || 0n),
+                timestamp: block ? block.timestamp * 1000 : Date.now(),
+                status: receipt?.status ? 'confirmed' : 'failed',
+                gasUsed: receipt ? ethers.formatEther(receipt.gasUsed * gasPrice) : '0',
+                gasPrice: ethers.formatUnits(gasPrice, 'gwei'),
+                blockNumber: tx.blockNumber || 0,
+                network: currentNetwork
+              });
+            }
+          } catch (error) {
+            console.warn('Error processing transaction:', error);
+          }
+        }
+      }
+      
+      return transactions;
+    } catch (error) {
+      console.error('Error fetching wallet transactions:', error);
+      return [];
+    }
+  };
+  
+  // Helper function to merge transactions and remove duplicates
+  const mergeTransactions = (oldTxs: Transaction[], newTxs: Transaction[]): Transaction[] => {
+    const txMap = new Map<string, Transaction>();
+    
+    // Add old transactions to map
+    oldTxs.forEach(tx => txMap.set(tx.hash, tx));
+    
+    // Add or update with new transactions
+    newTxs.forEach(tx => txMap.set(tx.hash, tx));
+    
+    // Convert map back to array and sort by timestamp
+    return Array.from(txMap.values()).sort((a, b) => b.timestamp - a.timestamp);
+  };
+  
+  const calculateGasFee = async () => {
+    if (!wallet || !recipient || !amount || parseFloat(amount) <= 0) {
+      setGasEstimate(null);
+      return;
+    }
+    
+    try {
+      setIsEstimatingGas(true);
+      
+      // Validate address
+      if (!ethers.isAddress(recipient)) {
+        throw new Error('Invalid wallet address');
+      }
+      
+      const estimate = await estimateGasFee(wallet, recipient, amount);
+      setGasEstimate(estimate);
+    } catch (error) {
+      console.error('Error estimating gas fee:', error);
+      setGasEstimate(null);
+    } finally {
+      setIsEstimatingGas(false);
+    }
+  };
+  
+  // Recalculate gas fee when inputs change
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (wallet && recipient && amount && parseFloat(amount) > 0) {
+        calculateGasFee();
+      }
+    }, 500); // Debounce
+    
+    return () => clearTimeout(timer);
+  }, [wallet, recipient, amount]);
 
   const handleSendTransaction = async () => {
     if (!wallet || !recipient || !amount) return;
@@ -237,7 +438,7 @@ export const WalletDetail = () => {
       
       // Validate address
       if (!ethers.isAddress(recipient)) {
-        throw new Error('Invalid recipient address');
+        throw new Error('Invalid wallet address');
       }
       
       // Connect to network
@@ -246,63 +447,71 @@ export const WalletDetail = () => {
         throw new Error('Network not found');
       }
       
-      const provider = new ethers.JsonRpcProvider(network.rpc);
-      
-      // Create wallet instance
-      const walletInstance = new ethers.Wallet(wallet.privateKey, provider);
-      
-      // Check balance
-      const currentBalance = await provider.getBalance(wallet.address);
-      const sendAmount = ethers.parseEther(amount);
-      
-      if (sendAmount > currentBalance) {
-        throw new Error('Insufficient balance');
+      // Get latest gas estimate if needed
+      if (!gasEstimate) {
+        await calculateGasFee();
       }
       
-      // Send transaction
-      const tx = await walletInstance.sendTransaction({
-        to: recipient,
-        value: sendAmount,
+      // Validate amount after gas fees
+      if (gasEstimate && parseFloat(amount) > parseFloat(gasEstimate.maxAmount)) {
+        throw new Error(`Insufficient funds for transaction. Maximum available after gas: ${gasEstimate.maxAmount} ETH`);
+      }
+      
+      // Use the sendTransaction function imported at the top of the file
+      
+      // Show confirmation toast
+      toast({
+        title: 'Sending Transaction',
+        description: `Sending ${amount} ETH plus network fee: ${gasEstimate?.gasCostEther || '0'} ETH`,
+        status: 'info',
+        duration: 3000,
       });
+      
+      // Send transaction with gas estimation
+      const txHash = await sendTransaction(wallet, recipient, amount, false);
       
       toast({
         title: 'Transaction Submitted',
-        description: `Transaction hash: ${tx.hash}`,
+        description: `Transaction hash: ${txHash}`,
         status: 'info',
         duration: 5000,
       });
       
-      // Wait for confirmation
-      await tx.wait();
-      
       // Update balance
-      const newBalance = await provider.getBalance(wallet.address);
-      const formattedBalance = ethers.formatEther(newBalance);
-      setBalance(formattedBalance);
-      
-      // Update wallet in storage
-      const updatedWallet = {...wallet, balance: formattedBalance};
-      updateWalletInStorage(updatedWallet);
+      await refreshBalance();
       
       // Add transaction to list
+      const sentAmount = amount;
+      const gasCost = gasEstimate ? gasEstimate.gasCostEther : '0';
+      const gasPrice = gasEstimate ? ethers.formatUnits(gasEstimate.gasPrice, 'gwei') : '0';
+      
       const newTransaction: Transaction = {
-        hash: tx.hash,
+        hash: txHash,
         from: wallet.address,
         to: recipient,
-        value: amount,
+        value: sentAmount,
         timestamp: Date.now(),
         status: 'confirmed',
+        gasUsed: gasCost,
+        gasPrice: gasPrice,
+        network: wallet.network
       };
       
-      setTransactions([newTransaction, ...transactions]);
+      // Update transactions state
+      const updatedTransactions = [newTransaction, ...transactions];
+      setTransactions(updatedTransactions);
+      
+      // Save to localStorage
+      saveTransactions(wallet.address, wallet.network, updatedTransactions);
       
       // Clear form
       setRecipient('');
       setAmount('');
+      setGasEstimate(null);
       
       toast({
         title: 'Success',
-        description: 'Transaction sent successfully',
+        description: `Transaction sent successfully. Gas fee: ${gasCost} ETH`,
         status: 'success',
         duration: 5000,
       });
@@ -358,6 +567,46 @@ export const WalletDetail = () => {
   
   const formatDate = (timestamp: number) => {
     return new Date(timestamp).toLocaleString();
+  };
+  
+  const formatTimeAgo = (timestamp: number) => {
+    const now = Date.now();
+    const diff = now - timestamp;
+    
+    // Convert to seconds
+    const seconds = Math.floor(diff / 1000);
+    
+    if (seconds < 60) {
+      return 'just now';
+    }
+    
+    // Convert to minutes
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) {
+      return `${minutes} min${minutes > 1 ? 's' : ''} ago`;
+    }
+    
+    // Convert to hours
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) {
+      return `${hours} hr${hours > 1 ? 's' : ''} ago`;
+    }
+    
+    // Convert to days
+    const days = Math.floor(hours / 24);
+    if (days < 30) {
+      return `${days} day${days > 1 ? 's' : ''} ago`;
+    }
+    
+    // Convert to months
+    const months = Math.floor(days / 30);
+    if (months < 12) {
+      return `${months} month${months > 1 ? 's' : ''} ago`;
+    }
+    
+    // Convert to years
+    const years = Math.floor(months / 12);
+    return `${years} year${years > 1 ? 's' : ''} ago`;
   };
 
   if (isLoading) {
@@ -513,20 +762,105 @@ export const WalletDetail = () => {
                           <Input
                             type="number"
                             value={amount}
-                            onChange={(e) => setAmount(e.target.value)}
+                            onChange={(e) => {
+                              setAmount(e.target.value);
+                            }}
                             placeholder="0.0"
                             size="lg"
                             min="0"
                             step="0.0001"
                           />
-                          <InputRightElement width="4.5rem">
-                            <Button h="1.75rem" size="sm" onClick={() => setAmount(balance)}>
-                              Max
+                          <InputRightElement width="4.5rem" h="100%">
+                            <Button 
+                              h="1.75rem" 
+                              size="sm" 
+                              onClick={() => {
+                                // If there's already an amount, clear it
+                                // Otherwise set to maximum
+                                if (amount && parseFloat(amount) > 0) {
+                                  setAmount("");
+                                } else {
+                                  // Calculate max amount considering gas fees
+                                  if (gasEstimate) {
+                                    setAmount(gasEstimate.maxAmount);
+                                  } else {
+                                    setAmount(balance);
+                                  }
+                                }
+                              }}
+                              colorScheme={amount && parseFloat(amount) > 0 ? "gray" : "blue"}
+                            >
+                              {amount && parseFloat(amount) > 0 ? "Clear" : "Max"}
                             </Button>
                           </InputRightElement>
                         </InputGroup>
                         <FormHelperText>Available: {balance} {network?.currency || 'ETH'}</FormHelperText>
                       </FormControl>
+                      
+                      {/* Gas Fee Estimate */}
+                      <Box 
+                        p={4} 
+                        borderRadius="md" 
+                        borderWidth="1px" 
+                        borderColor="gray.200"
+                        bg="gray.50"
+                      >
+                        <HStack justifyContent="space-between" mb={3}>
+                          <Heading size="sm">
+                            <HStack>
+                              <FaGasPump />
+                              <Text>Transaction Details</Text>
+                            </HStack>
+                          </Heading>
+                          {isEstimatingGas && <Spinner size="sm" />}
+                        </HStack>
+                        
+                        {gasEstimate ? (
+                          <VStack align="stretch" spacing={3}>
+                            <Grid templateColumns="1fr 1fr" gap={4}>
+                              <GridItem>
+                                <VStack align="start" spacing={1}>
+                                  <Text fontSize="sm" color="gray.600">You Send:</Text>
+                                  <Text fontWeight="bold">{amount} ETH</Text>
+                                </VStack>
+                              </GridItem>
+                              
+                              <GridItem>
+                                <VStack align="start" spacing={1}>
+                                  <Text fontSize="sm" color="gray.600">Receive:</Text>
+                                  <Text fontWeight="bold">{amount} ETH</Text>
+                                </VStack>
+                              </GridItem>
+                            </Grid>
+                            
+                            <Divider />
+                            
+                            <HStack justify="space-between">
+                              <VStack align="start" spacing={0}>
+                                <Text fontSize="sm" color="gray.600">Network Fee:</Text>
+                                <Text fontSize="xs" color="gray.500">
+                                  (~$
+                                  {(parseFloat(gasEstimate.gasCostEther) * 2000).toFixed(2)})
+                                </Text>
+                              </VStack>
+                              <Text fontWeight="bold">{gasEstimate.gasCostEther} ETH</Text>
+                            </HStack>
+                            
+                            {parseFloat(amount) > parseFloat(gasEstimate.maxAmount) && (
+                              <Alert status="warning" borderRadius="md" size="sm">
+                                <AlertIcon />
+                                <Text fontSize="sm">
+                                  The amount exceeds your available balance after gas fees.
+                                </Text>
+                              </Alert>
+                            )}
+                          </VStack>
+                        ) : (
+                          <Text fontSize="sm" color="gray.500">
+                            Enter a valid address and amount to see transaction details
+                          </Text>
+                        )}
+                      </Box>
 
                       <Button
                         colorScheme="purple"
@@ -534,10 +868,17 @@ export const WalletDetail = () => {
                         isLoading={isSending}
                         loadingText="Sending..."
                         onClick={handleSendTransaction}
-                        isDisabled={!recipient || !amount || parseFloat(amount) <= 0 || parseFloat(amount) > parseFloat(balance)}
+                        isDisabled={
+                          !recipient || 
+                          !amount || 
+                          parseFloat(amount) <= 0 || 
+                          (gasEstimate && parseFloat(amount) > parseFloat(gasEstimate.maxAmount)) ||
+                          isEstimatingGas
+                        }
                         mt={4}
+                        leftIcon={<FaExchangeAlt />}
                       >
-                        Send Transaction
+                        Send {amount || 0} ETH
                       </Button>
                     </VStack>
                   </CardBody>
@@ -551,49 +892,115 @@ export const WalletDetail = () => {
                   </CardHeader>
                   <CardBody>
                     {transactions.length > 0 ? (
-                      <Table size="sm">
-                        <Thead>
-                          <Tr>
-                            <Th>Type</Th>
-                            <Th>Amount</Th>
-                            <Th>Address</Th>
-                            <Th>Date</Th>
-                            <Th>Status</Th>
-                          </Tr>
-                        </Thead>
-                        <Tbody>
-                          {transactions.map((tx) => (
-                            <Tr key={tx.hash}>
-                              <Td>
-                                <Badge colorScheme={tx.from === wallet.address ? "red" : "green"}>
-                                  {tx.from === wallet.address ? "Sent" : "Received"}
-                                </Badge>
-                              </Td>
-                              <Td>{tx.value} {network?.currency || 'ETH'}</Td>
-                              <Td isTruncated maxW="200px">
-                                {tx.from === wallet.address 
-                                  ? truncateAddress(tx.to)
-                                  : truncateAddress(tx.from)}
-                              </Td>
-                              <Td>{formatDate(tx.timestamp)}</Td>
-                              <Td>
-                                <Badge 
-                                  colorScheme={
-                                    tx.status === 'confirmed' ? 'green' : 
-                                    tx.status === 'pending' ? 'yellow' : 'red'
-                                  }
-                                >
-                                  {tx.status}
-                                </Badge>
-                              </Td>
+                      <Box overflowX="auto">
+                        <Table size="sm" variant="simple">
+                          <Thead>
+                            <Tr>
+                              <Th>Type</Th>
+                              <Th>Amount</Th>
+                              <Th>Address</Th>
+                              <Th>Date</Th>
+                              <Th>Gas Fee</Th>
+                              <Th>Status</Th>
+                              <Th>Actions</Th>
                             </Tr>
-                          ))}
-                        </Tbody>
-                      </Table>
+                          </Thead>
+                          <Tbody>
+                            {transactions.map((tx) => (
+                              <Tr key={tx.hash}>
+                                <Td>
+                                  <Badge colorScheme={tx.from === wallet.address ? "red" : "green"}>
+                                    {tx.from === wallet.address ? "Sent" : "Received"}
+                                  </Badge>
+                                </Td>
+                                <Td fontWeight="medium">
+                                  {parseFloat(tx.value).toFixed(6)} {network?.currency || 'ETH'}
+                                </Td>
+                                <Td isTruncated maxW="150px">
+                                  <Tooltip hasArrow label={tx.from === wallet.address ? tx.to : tx.from}>
+                                    <Text>
+                                      {tx.from === wallet.address 
+                                        ? truncateAddress(tx.to)
+                                        : truncateAddress(tx.from)}
+                                    </Text>
+                                  </Tooltip>
+                                </Td>
+                                <Td>
+                                  <Tooltip hasArrow label={new Date(tx.timestamp).toLocaleString()}>
+                                    <Text fontSize="sm">{formatTimeAgo(tx.timestamp)}</Text>
+                                  </Tooltip>
+                                </Td>
+                                <Td>
+                                  {tx.gasUsed ? (
+                                    <Tooltip hasArrow label={`${tx.gasPrice} Gwei`}>
+                                      <Text fontSize="sm">{parseFloat(tx.gasUsed).toFixed(6)} ETH</Text>
+                                    </Tooltip>
+                                  ) : (
+                                    <Text fontSize="sm">-</Text>
+                                  )}
+                                </Td>
+                                <Td>
+                                  <Badge 
+                                    colorScheme={
+                                      tx.status === 'confirmed' ? 'green' : 
+                                      tx.status === 'pending' ? 'yellow' : 'red'
+                                    }
+                                  >
+                                    {tx.status}
+                                  </Badge>
+                                </Td>
+                                <Td>
+                                  <HStack spacing={1}>
+                                    <Tooltip hasArrow label="View on Explorer">
+                                      <IconButton
+                                        aria-label="View on explorer"
+                                        icon={<FaExchangeAlt />}
+                                        size="xs"
+                                        variant="ghost"
+                                        onClick={() => {
+                                          const network = SUPPORTED_NETWORKS.find(n => n.id === tx.network);
+                                          if (network?.explorer) {
+                                            window.open(`${network.explorer}/tx/${tx.hash}`, '_blank');
+                                          }
+                                        }}
+                                      />
+                                    </Tooltip>
+                                    <Tooltip hasArrow label="Copy Transaction Hash">
+                                      <IconButton
+                                        aria-label="Copy transaction hash"
+                                        icon={<FaCopy />}
+                                        size="xs"
+                                        variant="ghost"
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(tx.hash);
+                                          toast({
+                                            title: "Transaction hash copied",
+                                            status: "success",
+                                            duration: 2000,
+                                          });
+                                        }}
+                                      />
+                                    </Tooltip>
+                                  </HStack>
+                                </Td>
+                              </Tr>
+                            ))}
+                          </Tbody>
+                        </Table>
+                      </Box>
                     ) : (
-                      <Text textAlign="center" py={4} color="gray.500">
-                        No transactions found for this wallet
-                      </Text>
+                      <VStack py={8} spacing={4}>
+                        <Text textAlign="center" color="gray.500">
+                          No transactions found for this wallet
+                        </Text>
+                        <Button 
+                          leftIcon={<FaSync />} 
+                          size="sm"
+                          onClick={() => loadTransactions(wallet.address)}
+                        >
+                          Refresh Transactions
+                        </Button>
+                      </VStack>
                     )}
                   </CardBody>
                 </Card>

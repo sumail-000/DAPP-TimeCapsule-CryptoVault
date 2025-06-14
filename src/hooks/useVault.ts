@@ -236,16 +236,17 @@ export const useVault = () => {
       const receipt = await tx.wait();
       console.log('Transaction confirmed:', receipt);
 
-      // Get the vault address from the transaction logs
-      const vaultCreatedLog = receipt.logs.find((log: any) => {
-        return log.topics[0] === '0x1a24bcf5290fedc4a4787de3bf58c1727b4244aa4d2303c2ae6071e1ba618612';
-      });
-
-      if (!vaultCreatedLog || !vaultCreatedLog.topics[2]) {
-        throw new Error('Could not find vault address in transaction logs');
+      // Get the vault address by querying the contract directly instead of relying on logs
+      // This is more robust as it doesn't depend on specific event signatures
+      const userVaults = await factoryContract.getUserVaults(selectedWallet.address);
+      
+      // The most recently created vault should be the last one in the array
+      if (!userVaults || userVaults.length === 0) {
+        throw new Error('No vaults found after creation. Please try again.');
       }
-
-      const vaultAddress = `0x${vaultCreatedLog.topics[2].slice(26)}`;
+      
+      // Get the most recently created vault address
+      const vaultAddress = userVaults[userVaults.length - 1];
       console.log('New vault created at:', vaultAddress);
 
       // Refresh vaults list
@@ -274,9 +275,15 @@ export const useVault = () => {
     setError(null);
 
     try {
-      // Send ETH to the vault
-      const tx = await signer.sendTransaction({
-        to: vaultAddress,
+      // Use the vault contract's deposit function instead of a direct transfer
+      const vaultContract = new ethers.Contract(
+        vaultAddress,
+        TimeCapsuleVaultABI,
+        signer
+      );
+      
+      // Call the deposit function with the ETH value
+      const tx = await vaultContract.deposit({
         value: ethers.parseEther(amount)
       });
 
