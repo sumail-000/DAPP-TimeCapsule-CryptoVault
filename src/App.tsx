@@ -2,6 +2,7 @@ import { Box, Container, Flex, Heading, Link, Spacer, Stack, Button } from '@cha
 import { BrowserRouter as Router, Routes, Route, Link as RouterLink } from 'react-router-dom'
 import { ChakraProvider, extendTheme } from '@chakra-ui/react'
 import { useState, useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 
 import { VaultForm } from './components/VaultForm'
 import { MyVaults } from './components/MyVaults'
@@ -14,8 +15,9 @@ const theme = extendTheme({
   // ... existing theme config
 })
 
-function App() {
+function AppLayout() {
   const [hasWallets, setHasWallets] = useState(false);
+  const location = useLocation();
 
   // Check if user has any saved wallets
   useEffect(() => {
@@ -28,18 +30,23 @@ function App() {
         setHasWallets(false);
       }
     };
-    
     checkWallets();
-    
-    // Listen for changes in localStorage
     window.addEventListener('storage', checkWallets);
     return () => window.removeEventListener('storage', checkWallets);
   }, []);
+
+  // Determine button label and link based on route
+  let buttonLabel = 'Create Wallet';
+  let buttonTo = '/wallet';
+  if (location.pathname.startsWith('/my-vaults') || location.pathname.startsWith('/create-vault')) {
+    buttonLabel = 'Create Vault';
+    buttonTo = '/create-vault';
+  } else if (location.pathname.startsWith('/wallet')) {
+    buttonLabel = 'Create Wallet';
+    buttonTo = '/wallet';
+  }
   
   return (
-    <ChakraProvider theme={theme}>
-      <NotificationsHandler />
-      <Router>
         <Box minH="100vh" minW="100vw" bgGradient="linear(to-br, blue.50, #E0F7FA, #B2EBF2)">
           {/* Navigation Bar */}
           <Flex as="nav" p={4} bg="rgba(255, 255, 255, 0.8)" backdropFilter="blur(10px)" boxShadow="sm" alignItems="center" zIndex="sticky" top="0" width="100%">
@@ -59,7 +66,7 @@ function App() {
               </Link>
               <Button 
                 as={RouterLink} 
-                to={hasWallets ? "/create-vault" : "/wallet"} 
+            to={buttonTo} 
                 colorScheme="purple" 
                 size="sm" 
                 px={5} 
@@ -68,7 +75,7 @@ function App() {
                 _hover={{ bg: "purple.600", shadow: "lg" }} 
                 transition="all 0.2s"
               >
-                {hasWallets ? "Create Vault" : "Create Wallet"}
+            {buttonLabel}
               </Button>
             </Stack>
           </Flex>
@@ -83,6 +90,15 @@ function App() {
             </Routes>
           </Container>
         </Box>
+  );
+}
+
+function App() {
+  return (
+    <ChakraProvider theme={theme}>
+      <NotificationsHandler />
+      <Router>
+        <AppLayout />
       </Router>
     </ChakraProvider>
   )

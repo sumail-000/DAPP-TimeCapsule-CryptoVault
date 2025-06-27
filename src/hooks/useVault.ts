@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { ethers } from 'ethers'
 import { TimeCapsuleVaultABI, VaultFactoryABI } from '../contracts/abis'
 import { VAULT_FACTORY_ADDRESS, ETH_USD_PRICE_FEED, CHAINLINK_PRICE_FEED_ABI } from '../utils/contracts'
@@ -28,6 +28,9 @@ export const useVault = () => {
   const [currentEthPrice, setCurrentEthPrice] = useState<bigint>(0n)
   const [provider, setProvider] = useState<ethers.JsonRpcProvider | null>(null);
   const [signer, setSigner] = useState<ethers.Wallet | null>(null);
+
+  // Track vaults that have been auto-withdrawn in this session
+  const autoWithdrawnVaults = useRef<Set<string>>(new Set());
 
   // Set up provider and wallet when component mounts
   useEffect(() => {
@@ -353,6 +356,29 @@ export const useVault = () => {
       setIsLoading(false);
     }
   };
+
+  // Poll for unlocked vaults and auto-withdraw
+  useEffect(() => {
+    if (!signer || !provider || !selectedWallet || vaults.length === 0) return;
+
+    const interval = setInterval(async () => {
+      for (const vault of vaults) {
+        if (!vault.isLocked && vault.balance > 0n && !autoWithdrawnVaults.current.has(vault.address)) {
+          try {
+            // Attempt to withdraw
+            await withdraw(vault.address);
+            autoWithdrawnVaults.current.add(vault.address);
+            // Optionally, you could show a toast here if you want user feedback
+          } catch (err) {
+            // Optionally handle error (e.g., log or show toast)
+            // Do not add to autoWithdrawnVaults so it will retry next poll
+          }
+        }
+      }
+    }, 10000); // Every 10 seconds
+
+    return () => clearInterval(interval);
+  }, [signer, provider, selectedWallet, vaults]);
 
   return {
     isLoading,

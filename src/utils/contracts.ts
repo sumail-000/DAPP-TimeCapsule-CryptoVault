@@ -3,7 +3,7 @@ import { parseEther } from 'viem'
 import type { Address } from 'viem'
 
 // Sepolia testnet addresses
-export const VAULT_FACTORY_ADDRESS = '0x0cAD8D31361db0D26d19ccbcc959292405793408' as const
+export const VAULT_FACTORY_ADDRESS = '0xD975149a670D280AAF64feB21eb2A39D6B577498' as const
 // ETH/USD price feed for Sepolia testnet - official Chainlink address
 export const ETH_USD_PRICE_FEED = '0x694AA1769357215DE4FAC081bf1f309aDC325306' as const
 
