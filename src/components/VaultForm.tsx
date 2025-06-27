@@ -15,7 +15,7 @@ import {
   Select,
 } from '@chakra-ui/react'
 import { motion } from 'framer-motion'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 
 const MotionButton = motion.create(ChakraButton)
 const MotionBox = motion.create(Box, {
@@ -24,6 +24,7 @@ const MotionBox = motion.create(Box, {
 
 export const VaultForm = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const [selectedWallet, setSelectedWallet] = useState<string | null>(null);
   const [wallets, setWallets] = useState<any[]>([]);
   
@@ -145,6 +146,9 @@ export const VaultForm = () => {
         status: 'success',
         duration: 5000,
       })
+      // Redirect to My Vaults page
+      navigate('/my-vaults');
+      return;
     } catch (err) {
       console.error('Error in handleCreateVault:', err)
       setError(err instanceof Error ? err.message : 'Failed to create vault')

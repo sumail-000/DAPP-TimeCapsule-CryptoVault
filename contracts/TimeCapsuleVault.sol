@@ -6,7 +6,6 @@ import "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.so
 contract TimeCapsuleVault {
     address public creator;
     uint256 public unlockTime;
-    bool public deposited;
     uint256 public targetPrice;
     AggregatorV3Interface public priceFeed;
     bool public isPriceLock;
@@ -23,9 +22,8 @@ contract TimeCapsuleVault {
     }
 
     function deposit() external payable {
-        require(!deposited, "Already deposited");
         require(msg.value > 0, "Must send ETH");
-        deposited = true;
+        // Multiple deposits allowed, no flag needed
     }
 
     function getLatestPrice() public view returns (int256) {
@@ -35,7 +33,7 @@ contract TimeCapsuleVault {
 
     function withdraw() external {
         require(msg.sender == creator, "Not creator");
-        require(deposited, "Nothing deposited");
+        require(address(this).balance > 0, "Nothing deposited");
         
         bool canUnlock = false;
         string memory unlockReason = "";
@@ -50,7 +48,6 @@ contract TimeCapsuleVault {
         
         require(canUnlock, "Vault is still locked");
         
-        deposited = false;
         payable(creator).transfer(address(this).balance);
         emit VaultUnlocked(unlockReason);
     }
