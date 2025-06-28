@@ -4,6 +4,7 @@ import { TimeCapsuleVaultABI, VaultFactoryABI } from '../contracts/abis'
 import { VAULT_FACTORY_ADDRESS, ETH_USD_PRICE_FEED, CHAINLINK_PRICE_FEED_ABI } from '../utils/contracts'
 import { getContractError } from '../utils/errors'
 import { SUPPORTED_NETWORKS } from '../constants/networks'
+import { rateLimitedRpcCall, getSepoliaClient } from '../utils/rpc'
 
 export interface VaultData {
   address: string;
@@ -48,7 +49,8 @@ export const useVault = () => {
         // Create provider based on network
         const network = SUPPORTED_NETWORKS.find(n => n.id === wallet.network);
         if (network) {
-          const provider = new ethers.JsonRpcProvider(network.rpc);
+          // Use the first RPC endpoint as primary
+          const provider = new ethers.JsonRpcProvider(network.rpc[0]);
           setProvider(provider);
           
           // Create signer
@@ -65,14 +67,16 @@ export const useVault = () => {
       if (!provider) return;
 
       try {
-        const priceFeed = new ethers.Contract(
-          ETH_USD_PRICE_FEED,
-          CHAINLINK_PRICE_FEED_ABI,
-          provider
-        );
-        
-        const priceData = await priceFeed.latestRoundData();
-        setCurrentEthPrice(BigInt(priceData[1].toString()));
+        await rateLimitedRpcCall(async () => {
+          const priceFeed = new ethers.Contract(
+            ETH_USD_PRICE_FEED,
+            CHAINLINK_PRICE_FEED_ABI,
+            provider
+          );
+          
+          const priceData = await priceFeed.latestRoundData();
+          setCurrentEthPrice(BigInt(priceData[1].toString()));
+        });
       } catch (err) {
         console.error('Error fetching current ETH price:', err);
         setError('Unable to fetch ETH/USD price from Chainlink. Please make sure you are connected to Sepolia network.');
@@ -81,7 +85,7 @@ export const useVault = () => {
 
     if (provider) {
       fetchCurrentEthPrice();
-      const interval = setInterval(fetchCurrentEthPrice, 10000); // Update every 10 seconds
+      const interval = setInterval(fetchCurrentEthPrice, 30000); // Update every 30 seconds instead of 10
       return () => clearInterval(interval);
     }
   }, [provider]);
@@ -90,52 +94,54 @@ export const useVault = () => {
     if (!provider || !selectedWallet) return null;
 
     try {
-      const vaultContract = new ethers.Contract(vaultAddress, TimeCapsuleVaultABI, provider);
-      const priceFeed = new ethers.Contract(ETH_USD_PRICE_FEED, CHAINLINK_PRICE_FEED_ABI, provider);
-      
-      const [balance, unlockTime, creator, actualTargetPrice] = await Promise.all([
-        provider.getBalance(vaultAddress),
-        vaultContract.unlockTime(),
-        vaultContract.creator(),
-        vaultContract.targetPrice(),
-      ]);
-      
-      // Get lock status
-      const lockStatus = await vaultContract.getLockStatus();
-      // lockStatus: [locked, currentPrice, timeRemaining, isPriceBased, isGoalBased, currentAmount, goalAmount, progressPercentage, unlockReason]
-      const [locked, currentPrice, timeRemaining, isPriceBased, isGoalBased, currentAmount, goalAmount, progressPercentage, unlockReason] = lockStatus;
-      
-      // Get current price
-      const currentPriceResult = await priceFeed.latestRoundData();
-      
-      const currentTime = Math.floor(Date.now() / 1000);
-      const remainingSeconds = Number(unlockTime) - currentTime;
+      return await rateLimitedRpcCall(async () => {
+        const vaultContract = new ethers.Contract(vaultAddress, TimeCapsuleVaultABI, provider);
+        const priceFeed = new ethers.Contract(ETH_USD_PRICE_FEED, CHAINLINK_PRICE_FEED_ABI, provider);
+        
+        const [balance, unlockTime, creator, actualTargetPrice] = await Promise.all([
+          provider.getBalance(vaultAddress),
+          vaultContract.unlockTime(),
+          vaultContract.creator(),
+          vaultContract.targetPrice(),
+        ]);
+        
+        // Get lock status
+        const lockStatus = await vaultContract.getLockStatus();
+        // lockStatus: [locked, currentPrice, timeRemaining, isPriceBased, isGoalBased, currentAmount, goalAmount, progressPercentage, unlockReason]
+        const [locked, currentPrice, timeRemaining, isPriceBased, isGoalBased, currentAmount, goalAmount, progressPercentage, unlockReason] = lockStatus;
+        
+        // Get current price
+        const currentPriceResult = await priceFeed.latestRoundData();
+        
+        const currentTime = Math.floor(Date.now() / 1000);
+        const remainingSeconds = Number(unlockTime) - currentTime;
 
-      const isPriceLocked = isPriceBased;
-      const isGoalLocked = isGoalBased;
-      const isTimeLocked = locked && !isPriceLocked && !isGoalLocked;
-      let lockType: 'time' | 'price' | 'goal' = 'time';
-      if (isPriceLocked) lockType = 'price';
-      if (isGoalLocked) lockType = 'goal';
+        const isPriceLocked = isPriceBased;
+        const isGoalLocked = isGoalBased;
+        const isTimeLocked = locked && !isPriceLocked && !isGoalLocked;
+        let lockType: 'time' | 'price' | 'goal' = 'time';
+        if (isPriceLocked) lockType = 'price';
+        if (isGoalLocked) lockType = 'goal';
 
-      return {
-        address: vaultAddress,
-        balance: BigInt(balance.toString()),
-        unlockTime: BigInt(unlockTime.toString()),
-        targetPrice: BigInt(actualTargetPrice.toString()),
-        goalAmount: BigInt(goalAmount?.toString() || '0'),
-        currentAmount: BigInt(currentAmount?.toString() || '0'),
-        progressPercentage: Number(progressPercentage),
-        currentPrice: BigInt(currentPriceResult[1].toString()),
-        remainingTime: remainingSeconds > 0 ? remainingSeconds : 0,
-        creator,
-        isTimeLocked,
-        isPriceLocked,
-        isGoalLocked,
-        lockType,
-        isLocked: locked,
-        unlockReason: unlockReason,
-      };
+        return {
+          address: vaultAddress,
+          balance: BigInt(balance.toString()),
+          unlockTime: BigInt(unlockTime.toString()),
+          targetPrice: BigInt(actualTargetPrice.toString()),
+          goalAmount: BigInt(goalAmount?.toString() || '0'),
+          currentAmount: BigInt(currentAmount?.toString() || '0'),
+          progressPercentage: Number(progressPercentage),
+          currentPrice: BigInt(currentPriceResult[1].toString()),
+          remainingTime: remainingSeconds > 0 ? remainingSeconds : 0,
+          creator,
+          isTimeLocked,
+          isPriceLocked,
+          isGoalLocked,
+          lockType,
+          isLocked: locked,
+          unlockReason: unlockReason,
+        };
+      });
     } catch (err) {
       console.error(`Error fetching details for vault ${vaultAddress}:`, err);
       return null;
@@ -150,35 +156,37 @@ export const useVault = () => {
       setIsLoading(true);
       setError(null);
       try {
-        // First verify the contract exists
-        const code = await provider.getCode(VAULT_FACTORY_ADDRESS);
-        if (!code || code === '0x') {
-          setError('Vault factory contract not deployed at the specified address. Make sure you have deployed the contracts to Sepolia testnet.');
-          setIsLoading(false);
-          return;
-        }
+        await rateLimitedRpcCall(async () => {
+          // First verify the contract exists
+          const code = await provider.getCode(VAULT_FACTORY_ADDRESS);
+          if (!code || code === '0x') {
+            setError('Vault factory contract not deployed at the specified address. Make sure you have deployed the contracts to Sepolia testnet.');
+            setIsLoading(false);
+            return;
+          }
 
-        const factoryContract = new ethers.Contract(
-          VAULT_FACTORY_ADDRESS,
-          VaultFactoryABI,
-          provider
-        );
-        
-        const vaultAddresses = await factoryContract.getUserVaults(selectedWallet.address);
-        
-        if (!vaultAddresses) {
-          throw new Error('Invalid response from getUserVaults');
-        }
+          const factoryContract = new ethers.Contract(
+            VAULT_FACTORY_ADDRESS,
+            VaultFactoryABI,
+            provider
+          );
+          
+          const vaultAddresses = await factoryContract.getUserVaults(selectedWallet.address);
+          
+          if (!vaultAddresses) {
+            throw new Error('Invalid response from getUserVaults');
+          }
 
-        const fetchedVaultDetails = await Promise.all(
-          vaultAddresses.map(fetchVaultDetails)
-        );
+          const fetchedVaultDetails = await Promise.all(
+            vaultAddresses.map(fetchVaultDetails)
+          );
 
-        function isVaultData(vault: VaultData | null): vault is VaultData {
-          return Boolean(vault);
-        }
+          function isVaultData(vault: VaultData | null): vault is VaultData {
+            return Boolean(vault);
+          }
 
-        setVaults(fetchedVaultDetails.filter(isVaultData).filter(vault => vault.balance > 0n));
+          setVaults(fetchedVaultDetails.filter(isVaultData).filter(vault => vault.balance > 0n));
+        });
       } catch (err) {
         console.error('Error loading all vaults:', err);
         setError(getContractError(err));
@@ -214,52 +222,54 @@ export const useVault = () => {
     try {
       console.log('Starting vault creation with params:', { unlockTime, targetPrice, targetAmount });
       
-      // First verify if the factory contract exists
-      const code = await provider.getCode(VAULT_FACTORY_ADDRESS);
-      if (!code || code === '0x') {
-        setError('Vault factory contract not deployed. Please deploy the contract first.');
-        return;
-      }
+      return await rateLimitedRpcCall(async () => {
+        // First verify if the factory contract exists
+        const code = await provider.getCode(VAULT_FACTORY_ADDRESS);
+        if (!code || code === '0x') {
+          setError('Vault factory contract not deployed. Please deploy the contract first.');
+          return;
+        }
 
-      console.log('Contract exists, creating vault...');
+        console.log('Contract exists, creating vault...');
 
-      // Create the vault
-      const factoryContract = new ethers.Contract(
-        VAULT_FACTORY_ADDRESS,
-        VaultFactoryABI,
-        signer
-      );
+        // Create the vault
+        const factoryContract = new ethers.Contract(
+          VAULT_FACTORY_ADDRESS,
+          VaultFactoryABI,
+          signer
+        );
 
-      console.log('Calling createVault with params:', [unlockTime, targetPrice, targetAmount, ETH_USD_PRICE_FEED]);
-      
-      const tx = await factoryContract.createVault(
-        BigInt(unlockTime),
-        BigInt(targetPrice),
-        BigInt(targetAmount),
-        ETH_USD_PRICE_FEED
-      );
+        console.log('Calling createVault with params:', [unlockTime, targetPrice, targetAmount, ETH_USD_PRICE_FEED]);
+        
+        const tx = await factoryContract.createVault(
+          BigInt(unlockTime),
+          BigInt(targetPrice),
+          BigInt(targetAmount),
+          ETH_USD_PRICE_FEED
+        );
 
-      console.log('Transaction submitted:', tx.hash);
+        console.log('Transaction submitted:', tx.hash);
 
-      // Wait for transaction to be mined
-      const receipt = await tx.wait();
-      console.log('Transaction confirmed:', receipt);
+        // Wait for transaction to be mined
+        const receipt = await tx.wait();
+        console.log('Transaction confirmed:', receipt);
 
-      // Get the vault address by querying the contract directly
-      const userVaults = await factoryContract.getUserVaults(selectedWallet.address);
-      if (!userVaults || userVaults.length === 0) {
-        throw new Error('No vaults found after creation. Please try again.');
-      }
-      const vaultAddress = userVaults[userVaults.length - 1];
-      console.log('New vault created at:', vaultAddress);
+        // Get the vault address by querying the contract directly
+        const userVaults = await factoryContract.getUserVaults(selectedWallet.address);
+        if (!userVaults || userVaults.length === 0) {
+          throw new Error('No vaults found after creation. Please try again.');
+        }
+        const vaultAddress = userVaults[userVaults.length - 1];
+        console.log('New vault created at:', vaultAddress);
 
-      // Refresh vaults list
-      const vaultDetails = await fetchVaultDetails(vaultAddress);
-      if (vaultDetails) {
-        setVaults(prevVaults => [...prevVaults, vaultDetails]);
-      }
+        // Refresh vaults list
+        const vaultDetails = await fetchVaultDetails(vaultAddress);
+        if (vaultDetails) {
+          setVaults(prevVaults => [...prevVaults, vaultDetails]);
+        }
 
-      return vaultAddress;
+        return vaultAddress;
+      });
     } catch (err) {
       console.error('Error creating new vault:', err);
       const errorMessage = getContractError(err);
@@ -376,18 +386,20 @@ export const useVault = () => {
           try {
             console.log(`Attempting auto-withdrawal from vault ${vault.address}`);
             
-            // Double-check the vault status before withdrawing
-            const vaultContract = new ethers.Contract(vault.address, TimeCapsuleVaultABI, provider);
-            const lockStatus = await vaultContract.getLockStatus();
-            
-            // Only proceed if the vault is actually unlocked
-            if (!lockStatus[0]) { // locked = false
-              await withdraw(vault.address);
-              autoWithdrawnVaults.current.add(vault.address);
-              console.log(`Auto-withdrawal successful for vault ${vault.address}`);
-            } else {
-              console.log(`Vault ${vault.address} is still locked, skipping auto-withdrawal`);
-            }
+            await rateLimitedRpcCall(async () => {
+              // Double-check the vault status before withdrawing
+              const vaultContract = new ethers.Contract(vault.address, TimeCapsuleVaultABI, provider);
+              const lockStatus = await vaultContract.getLockStatus();
+              
+              // Only proceed if the vault is actually unlocked
+              if (!lockStatus[0]) { // locked = false
+                await withdraw(vault.address);
+                autoWithdrawnVaults.current.add(vault.address);
+                console.log(`Auto-withdrawal successful for vault ${vault.address}`);
+              } else {
+                console.log(`Vault ${vault.address} is still locked, skipping auto-withdrawal`);
+              }
+            });
           } catch (err) {
             console.error(`Auto-withdrawal failed for vault ${vault.address}:`, err);
             // Don't add to autoWithdrawnVaults so it will retry next poll
@@ -396,7 +408,7 @@ export const useVault = () => {
           }
         }
       }
-    }, 30000); // Check every 30 seconds instead of 10
+    }, 60000); // Check every 60 seconds instead of 30 to reduce rate limiting
 
     return () => clearInterval(interval);
   }, [signer, provider, selectedWallet, vaults]);

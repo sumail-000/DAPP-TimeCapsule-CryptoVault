@@ -55,6 +55,8 @@ import { useNavigate } from 'react-router-dom';
 import { SUPPORTED_NETWORKS } from '../constants/networks';
 import { FaPlus, FaCopy, FaEye, FaEyeSlash, FaWallet, FaLock, FaQrcode, FaCheck, FaSync, FaKey } from 'react-icons/fa';
 import { QRCodeSVG } from 'qrcode.react';
+import { NetworkContext } from '../App';
+import React from 'react';
 
 const MotionCard = motion.create(Card);
 
@@ -67,16 +69,16 @@ interface WalletData {
 
 export const WalletManager = () => {
   const [wallets, setWallets] = useState<WalletData[]>([]);
-  const [selectedNetwork, setSelectedNetwork] = useState(SUPPORTED_NETWORKS[0].id);
   const [isCreating, setIsCreating] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [showPrivateKey, setShowPrivateKey] = useState({});
+  const [showPrivateKey, setShowPrivateKey] = useState<Record<string, boolean>>({});
   const { isOpen, onOpen, onClose } = useDisclosure();
   const [newWallet, setNewWallet] = useState<WalletData | null>(null);
   const [selectedWallet, setSelectedWallet] = useState<WalletData | null>(null);
   const [loading, setLoading] = useState(true);
   const toast = useToast();
   const navigate = useNavigate();
+  const { network: selectedNetwork } = React.useContext(NetworkContext);
   
   // Modal for viewing a wallet's private key
   const { 
@@ -93,7 +95,6 @@ export const WalletManager = () => {
   } = useDisclosure();
   
   const [importPrivateKey, setImportPrivateKey] = useState('');
-  const [importNetwork, setImportNetwork] = useState(SUPPORTED_NETWORKS[0].id);
   const [isImporting, setIsImporting] = useState(false);
   
   const privateKeyRef = useRef<HTMLInputElement>(null);
@@ -126,8 +127,8 @@ export const WalletManager = () => {
       // Create new wallet
       const wallet = ethers.Wallet.createRandom();
       
-      // Get network details 
-      const network = SUPPORTED_NETWORKS.find(n => n.id === selectedNetwork);
+      // Use selectedNetwork from context
+      const network = selectedNetwork;
       
       if (!network) {
         throw new Error("Selected network not found");
@@ -138,11 +139,11 @@ export const WalletManager = () => {
       let balance;
       
       try {
-        provider = new ethers.JsonRpcProvider(network.rpc);
+        provider = new ethers.JsonRpcProvider(network.rpc[0]);
         const connectedWallet = wallet.connect(provider);
         balance = await provider.getBalance(connectedWallet.address);
       } catch (rpcError) {
-        console.warn(`Failed to connect to primary RPC: ${network.rpc}`, rpcError);
+        console.warn(`Failed to connect to primary RPC: ${network.rpc[0]}`, rpcError);
         // Use a mock balance as fallback for demo purposes
         balance = ethers.parseEther("0");
       }
@@ -150,7 +151,7 @@ export const WalletManager = () => {
       const walletData: WalletData = {
         address: wallet.address,
         privateKey: wallet.privateKey,
-        network: selectedNetwork,
+        network: network.id,
         balance: ethers.formatEther(balance),
       };
 
@@ -187,8 +188,8 @@ export const WalletManager = () => {
         throw new Error('This wallet has already been imported');
       }
       
-      // Get network details 
-      const network = SUPPORTED_NETWORKS.find(n => n.id === importNetwork);
+      // Use selectedNetwork from context
+      const network = selectedNetwork;
       
       if (!network) {
         throw new Error("Selected network not found");
@@ -198,10 +199,10 @@ export const WalletManager = () => {
       let balance;
       
       try {
-        const provider = new ethers.JsonRpcProvider(network.rpc);
+        const provider = new ethers.JsonRpcProvider(network.rpc[0]);
         balance = await provider.getBalance(wallet.address);
       } catch (rpcError) {
-        console.warn(`Failed to connect to RPC: ${network.rpc}`, rpcError);
+        console.warn(`Failed to connect to RPC: ${network.rpc[0]}`, rpcError);
         // Use a mock balance as fallback
         balance = ethers.parseEther("0");
       }
@@ -209,16 +210,16 @@ export const WalletManager = () => {
       const walletData: WalletData = {
         address: wallet.address,
         privateKey: wallet.privateKey,
-        network: importNetwork,
+        network: network.id,
         balance: ethers.formatEther(balance),
       };
 
-      setWallets([...wallets, walletData]);
+      setWallets(prev => [...prev, walletData]);
       onCloseImport();
       setImportPrivateKey('');
       
       toast({
-        title: 'Success',
+        title: 'Wallet Imported',
         description: 'Wallet imported successfully',
         status: 'success',
         duration: 5000,
@@ -269,7 +270,8 @@ export const WalletManager = () => {
             const network = SUPPORTED_NETWORKS.find(n => n.id === wallet.network);
             if (!network) return wallet;
             
-            const provider = new ethers.JsonRpcProvider(network.rpc);
+            // Use the first RPC endpoint from the array
+            const provider = new ethers.JsonRpcProvider(network.rpc[0]);
             const balance = await provider.getBalance(wallet.address);
             
             return {
@@ -477,21 +479,6 @@ export const WalletManager = () => {
                   <GridItem>
                     <Card variant="outline" p={4}>
                       <VStack spacing={4} align="stretch">
-                        <FormControl>
-                          <FormLabel>Select Network</FormLabel>
-                          <Select
-                            value={selectedNetwork}
-                            onChange={(e) => setSelectedNetwork(e.target.value)}
-                            icon={<FaWallet />}
-                          >
-                            {SUPPORTED_NETWORKS.map((network) => (
-                              <option key={network.id} value={network.id}>
-                                {network.name}
-                              </option>
-                            ))}
-                          </Select>
-                        </FormControl>
-
                         <Button
                           colorScheme="purple"
                           size="lg"
@@ -723,20 +710,6 @@ export const WalletManager = () => {
                     </Button>
                   </InputRightElement>
                 </InputGroup>
-              </FormControl>
-              
-              <FormControl isRequired>
-                <FormLabel>Select Network</FormLabel>
-                <Select
-                  value={importNetwork}
-                  onChange={(e) => setImportNetwork(e.target.value)}
-                >
-                  {SUPPORTED_NETWORKS.map((network) => (
-                    <option key={network.id} value={network.id}>
-                      {network.name}
-                    </option>
-                  ))}
-                </Select>
               </FormControl>
             </VStack>
           </ModalBody>

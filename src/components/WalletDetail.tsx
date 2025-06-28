@@ -186,7 +186,7 @@ export const WalletDetail = () => {
       
       try {
         // Connect to network
-        const provider = new ethers.JsonRpcProvider(network.rpc);
+        const provider = new ethers.JsonRpcProvider(network.rpc[0]);
         
         // Get balance
         const balanceWei = await provider.getBalance(targetWallet.address);
@@ -262,7 +262,7 @@ export const WalletDetail = () => {
       
       try {
         // Connect to provider
-        const provider = new ethers.JsonRpcProvider(network.rpc);
+        const provider = new ethers.JsonRpcProvider(network.rpc[0]);
         
         // Get the latest block number
         const latestBlock = await provider.getBlockNumber();

@@ -60,8 +60,10 @@ const VaultPerformanceTracker = ({
     progressPercent: 0
   });
   
+  // Move all hooks to the top, before any conditional logic
   const tableHeaderBg = useColorModeValue('gray.50', 'gray.700');
   const tableBorderColor = useColorModeValue('gray.200', 'gray.600');
+  const boxBg = useColorModeValue('white', 'gray.700');
   
   // Format time elapsed
   const formatTimeElapsed = (seconds: number) => {
@@ -150,6 +152,7 @@ const VaultPerformanceTracker = ({
     fetchPriceHistory();
   }, [vaultAddress, creationTime, targetPrice, isPriceLocked, isTimeLocked]);
   
+  // Render loading state
   if (isLoading) {
     return (
       <Center py={10}>
@@ -158,16 +161,17 @@ const VaultPerformanceTracker = ({
     );
   }
   
+  // Render error state
   if (error) {
     return (
       <Center py={10}>
         <Text color="red.500">{error}</Text>
       </Center>
     );
-  };
+  }
   
   return (
-    <Box p={4} borderRadius="lg" bg={useColorModeValue('white', 'gray.700')} shadow="sm" mb={6}>
+    <Box p={4} borderRadius="lg" bg={boxBg} shadow="sm" mb={6}>
       <Heading size="md" mb={4}>Vault Performance Metrics</Heading>
       
       {/* Performance Stats */}
