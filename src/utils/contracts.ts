@@ -3,7 +3,7 @@ import { parseEther } from 'viem'
 import type { Address } from 'viem'
 
 // Sepolia testnet addresses
-export const VAULT_FACTORY_ADDRESS = '0xD975149a670D280AAF64feB21eb2A39D6B577498' as const
+export const VAULT_FACTORY_ADDRESS = '0x236Bb0804115CD5E6e509149BD30eD733050C43d' as const
 // ETH/USD price feed for Sepolia testnet - official Chainlink address
 export const ETH_USD_PRICE_FEED = '0x694AA1769357215DE4FAC081bf1f309aDC325306' as const
 
@@ -45,11 +45,11 @@ export const getVaultFactoryContract = () => {
   }
 }
 
-export const createVault = (unlockTime: number, targetPrice: number) => ({
+export const createVault = (unlockTime: number, targetPrice: number, targetAmount: number) => ({
   address: VAULT_FACTORY_ADDRESS,
   abi: VaultFactoryABI,
   functionName: 'createVault',
-  args: [BigInt(unlockTime), BigInt(targetPrice), ETH_USD_PRICE_FEED],
+  args: [BigInt(unlockTime), BigInt(targetPrice), BigInt(targetAmount), ETH_USD_PRICE_FEED],
 } as const)
 
 export const depositToVault = (vaultAddress: string, amount: string) => ({

@@ -15,8 +15,12 @@ interface VaultDetailsModalProps {
   balance: bigint;
   isTimeLocked: boolean;
   isPriceLocked: boolean;
+  isGoalLocked?: boolean;
   unlockTime: bigint;
   targetPrice: bigint;
+  goalAmount?: bigint;
+  currentAmount?: bigint;
+  progressPercentage?: number;
   currentPrice: bigint;
   isLocked: boolean;
   unlockReason: string;
@@ -31,8 +35,12 @@ export const VaultDetailsModal = ({
   balance,
   isTimeLocked,
   isPriceLocked,
+  isGoalLocked,
   unlockTime,
   targetPrice,
+  goalAmount,
+  currentAmount,
+  progressPercentage,
   currentPrice,
   isLocked,
   unlockReason,
@@ -85,6 +93,7 @@ export const VaultDetailsModal = ({
   const formattedBalance = formatEther(balance);
   const formattedTargetPrice = Number(targetPrice) / 1e8;
   const formattedCurrentPrice = Number(currentPrice) / 1e8;
+  const formattedGoalUsd = goalAmount && currentPrice ? ((Number(goalAmount) / 1e18) * (Number(currentPrice) / 1e8)).toFixed(2) : undefined;
   const unlockDate = new Date(Number(unlockTime) * 1000).toLocaleString();
 
   return (
@@ -181,7 +190,7 @@ export const VaultDetailsModal = ({
                     <Box width="full">
                       <Text fontSize="sm" color="gray.600" fontWeight="medium">Lock Type</Text>
                       <Badge
-                        colorScheme={isTimeLocked ? 'blue' : 'purple'}
+                        colorScheme={isTimeLocked ? 'blue' : isPriceLocked ? 'purple' : isGoalLocked ? 'green' : 'gray'}
                         variant="solid"
                         px={3}
                         py={1}
@@ -189,7 +198,7 @@ export const VaultDetailsModal = ({
                         fontSize="0.9em"
                         mt={1}
                       >
-                        {isTimeLocked ? 'TIME LOCK' : 'PRICE LOCK'}
+                        {isTimeLocked ? 'TIME LOCK' : isPriceLocked ? 'PRICE LOCK' : isGoalLocked ? 'GOAL LOCK' : 'UNKNOWN'}
                       </Badge>
                     </Box>
                     {/* Countdown Timer for Time Locks */}
@@ -228,6 +237,26 @@ export const VaultDetailsModal = ({
                           isPriceLocked={isPriceLocked} 
                         />
                       </>
+                    )}
+                    {/* Goal Information for Goal Locks */}
+                    {isGoalLocked && goalAmount !== undefined && currentAmount !== undefined && progressPercentage !== undefined && (
+                      <Box width="full" mt={2} mb={2} p={3} bg="green.50" borderRadius="md" border="1px solid" borderColor="green.200">
+                        <VStack align="stretch" spacing={2}>
+                          <Text fontSize="md" color="green.700" fontWeight="semibold">Goal Progress</Text>
+                          <Text fontSize="sm" color="gray.600">Goal:</Text>
+                          <Text fontSize="lg" fontWeight="bold" color="green.800">
+                            {formattedGoalUsd ? `$${formattedGoalUsd}` : `${Number(goalAmount) / 1e18} ETH`}
+                          </Text>
+                          <Text fontSize="sm" color="gray.600">Current:</Text>
+                          <Text fontSize="lg" fontWeight="bold" color="green.800">
+                            {Number(currentAmount) / 1e18} ETH
+                          </Text>
+                          <Text fontSize="sm" color="gray.600">Progress:</Text>
+                          <Text fontSize="lg" fontWeight="bold" color="green.800">
+                            {progressPercentage}%
+                          </Text>
+                        </VStack>
+                      </Box>
                     )}
                     {/* Instead of Withdraw button, show auto-withdraw message */}
                     <Box

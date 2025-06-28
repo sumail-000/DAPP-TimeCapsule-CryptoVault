@@ -34,8 +34,10 @@ export const VaultForm = () => {
   const [unlockMinutes, setUnlockMinutes] = useState<string>('')
   const [targetPrice, setTargetPrice] = useState<string>('')
   const [isPriceLock, setIsPriceLock] = useState(false)
+  const [isGoalLock, setIsGoalLock] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [usdGoal, setUsdGoal] = useState('')
   const toast = useToast()
 
   // Load saved wallets from localStorage
@@ -72,7 +74,7 @@ export const VaultForm = () => {
       return
     }
 
-    if (!isPriceLock && (!unlockHours && !unlockMinutes)) {
+    if (!isPriceLock && !isGoalLock && (!unlockHours && !unlockMinutes)) {
       setError('Please enter unlock time in hours or minutes')
       return
     }
@@ -82,13 +84,25 @@ export const VaultForm = () => {
       return
     }
 
+    if (isGoalLock && !usdGoal) {
+      setError('Please enter a USD goal')
+      return
+    }
+
     // Price lock validation: target price must be greater than current price
     if (isPriceLock) {
       const targetPriceWei = parseFloat(targetPrice) * 1e8 // Assuming 8 decimals for price feed
       const currentPriceWei = Number(currentEthPrice) // currentEthPrice is bigint, convert to number
-
       if (targetPriceWei <= currentPriceWei) {
         setError('Target price must be greater than current ETH price.')
+        return
+      }
+    }
+
+    // Goal lock validation: USD goal must be greater than 0
+    if (isGoalLock) {
+      if (parseFloat(usdGoal) <= 0) {
+        setError('USD goal must be greater than 0.')
         return
       }
     }
@@ -98,24 +112,45 @@ export const VaultForm = () => {
       setError(null)
 
       let unlockTimestamp: number
-      if (!isPriceLock) {
+      let targetPriceParam = 0
+      let targetAmountParam = 0
+      if (isGoalLock) {
+        // For goal lock, set unlockTime to a very distant future to ensure it's not time-locked
+        unlockTimestamp = Math.floor(Date.now() / 1000) + (100 * 365 * 24 * 60 * 60)
+        // Calculate targetAmount in wei from USD goal and current ETH price
+        // ETH price is in 1e8, USD goal is in dollars
+        const ethPrice = Number(currentEthPrice) / 1e8
+        const ethAmount = parseFloat(usdGoal) / ethPrice
+        targetAmountParam = Math.floor(ethAmount * 1e18)
+        
+        console.log('Goal lock calculation:', {
+          usdGoal,
+          currentEthPrice: currentEthPrice.toString(),
+          ethPrice,
+          ethAmount,
+          targetAmountParam
+        });
+      } else if (isPriceLock) {
+        unlockTimestamp = Math.floor(Date.now() / 1000) + (100 * 365 * 24 * 60 * 60)
+        targetPriceParam = Math.floor(parseFloat(targetPrice) * 1e8)
+      } else {
         const totalUnlockSeconds = (parseInt(unlockHours || '0') * 3600) + (parseInt(unlockMinutes || '0') * 60)
         unlockTimestamp = Math.floor(Date.now() / 1000) + totalUnlockSeconds
-      } else {
-        // For price lock, set unlockTime to a very distant future to ensure it's not time-locked
-        unlockTimestamp = Math.floor(Date.now() / 1000) + (100 * 365 * 24 * 60 * 60) // Approximately 100 years from now
       }
 
       console.log('Creating vault with params:', {
         unlockTimestamp,
-        targetPrice: isPriceLock ? Math.floor(parseFloat(targetPrice) * 1e8) : 0,
+        targetPrice: targetPriceParam,
+        targetAmount: targetAmountParam,
         isPriceLock,
+        isGoalLock,
       })
 
       // Create the vault
       const vaultAddress = await createNewVault(
         unlockTimestamp,
-        isPriceLock ? Math.floor(parseFloat(targetPrice) * 1e8) : 0
+        targetPriceParam,
+        targetAmountParam
       )
 
       if (!vaultAddress) {
@@ -136,7 +171,9 @@ export const VaultForm = () => {
       setUnlockHours('')
       setUnlockMinutes('')
       setTargetPrice('')
+      setUsdGoal('')
       setIsPriceLock(false)
+      setIsGoalLock(false)
       setIsLoading(false)
 
       // Show success toast
@@ -217,13 +254,13 @@ export const VaultForm = () => {
 
         <FormControl id="amount" isInvalid={!!error && error.includes('amount')}>
           <FormLabel fontSize="md" fontWeight="bold" color="gray.700">
-            Amount (ETH)
+            Initial Deposit (ETH)
           </FormLabel>
           <ChakraInput
             type="number"
             value={amount}
             onChange={(e) => handleInputChange(e, setAmount)}
-            placeholder="Enter amount in ETH"
+            placeholder={isGoalLock ? "Enter initial deposit in ETH (e.g., 0.02)" : "Enter amount in ETH"}
             min="0"
             step="0.001"
             size="lg"
@@ -231,6 +268,11 @@ export const VaultForm = () => {
             _hover={{ borderColor: "blue.300" }}
             _focus={{ borderColor: "blue.500", boxShadow: "0 0 0 1px #63B3ED" }}
           />
+          {isGoalLock && usdGoal && currentEthPrice && (
+            <Text mt={2} fontSize="sm" color="blue.600">
+              💡 For ${usdGoal} goal: deposit ~{(parseFloat(usdGoal) / (Number(currentEthPrice) / 1e8)).toFixed(4)} ETH
+            </Text>
+          )}
           {error && error.includes('amount') && (
             <FormErrorMessage>{error}</FormErrorMessage>
           )}
@@ -242,8 +284,8 @@ export const VaultForm = () => {
           </FormLabel>
           <HStack spacing={4}>
             <MotionButton
-              onClick={() => setIsPriceLock(false)}
-              variant={!isPriceLock ? 'solid' : 'outline'}
+              onClick={() => { setIsPriceLock(false); setIsGoalLock(false); }}
+              variant={!isPriceLock && !isGoalLock ? 'solid' : 'outline'}
               colorScheme="purple"
               size="lg"
               flex="1"
@@ -253,7 +295,7 @@ export const VaultForm = () => {
               Time Lock
             </MotionButton>
             <MotionButton
-              onClick={() => setIsPriceLock(true)}
+              onClick={() => { setIsPriceLock(true); setIsGoalLock(false); }}
               variant={isPriceLock ? 'solid' : 'outline'}
               colorScheme="purple"
               size="lg"
@@ -263,10 +305,79 @@ export const VaultForm = () => {
             >
               Price Lock
             </MotionButton>
+            <MotionButton
+              onClick={() => { setIsGoalLock(true); setIsPriceLock(false); }}
+              variant={isGoalLock ? 'solid' : 'outline'}
+              colorScheme="purple"
+              size="lg"
+              flex="1"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              Goal Lock (USD)
+            </MotionButton>
           </HStack>
         </FormControl>
 
-        {!isPriceLock ? (
+        {isGoalLock ? (
+          <MotionBox initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
+            <FormControl id="usd-goal" isInvalid={!!error && error.includes('USD goal')}>
+              <FormLabel fontSize="md" fontWeight="bold" color="gray.700">
+                Goal Amount (USD)
+              </FormLabel>
+              <HStack>
+                <ChakraInput
+                  type="number"
+                  value={usdGoal}
+                  onChange={(e) => handleInputChange(e, setUsdGoal)}
+                  placeholder="Enter goal in USD"
+                  min="0"
+                  step="1"
+                  size="lg"
+                  borderColor="gray.300"
+                  _hover={{ borderColor: "blue.300" }}
+                  _focus={{ borderColor: "blue.500", boxShadow: "0 0 0 1px #63B3ED" }}
+                />
+                <Text fontSize="lg" fontWeight="semibold" color="gray.600">USD</Text>
+              </HStack>
+              <Text mt={2} fontSize="sm" color="gray.500">
+                Current ETH price: ${currentEthPrice ? (Number(currentEthPrice) / 1e8).toFixed(2) : 'Loading...'}
+              </Text>
+              {error && error.includes('USD goal') && (
+                <FormErrorMessage>{error}</FormErrorMessage>
+              )}
+            </FormControl>
+          </MotionBox>
+        ) : isPriceLock ? (
+          <MotionBox initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
+            <FormControl id="target-price" isInvalid={!!error && error.includes('price')}>
+              <FormLabel fontSize="md" fontWeight="bold" color="gray.700">
+                Target Price (USD)
+              </FormLabel>
+              <HStack>
+                <ChakraInput
+                  type="number"
+                  value={targetPrice}
+                  onChange={(e) => handleInputChange(e, setTargetPrice)}
+                  placeholder="Enter target price in USD"
+                  min="0"
+                  step="1"
+                  size="lg"
+                  borderColor="gray.300"
+                  _hover={{ borderColor: "blue.300" }}
+                  _focus={{ borderColor: "blue.500", boxShadow: "0 0 0 1px #63B3ED" }}
+                />
+                <Text fontSize="lg" fontWeight="semibold" color="gray.600">USD</Text>
+              </HStack>
+              <Text mt={2} fontSize="sm" color="gray.500">
+                Current ETH price: ${currentEthPrice ? (Number(currentEthPrice) / 1e8).toFixed(2) : 'Loading...'}
+              </Text>
+              {error && error.includes('price') && (
+                <FormErrorMessage>{error}</FormErrorMessage>
+              )}
+            </FormControl>
+          </MotionBox>
+        ) : (
           <MotionBox initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
             <FormControl id="unlock-time" isInvalid={!!error && (error.includes('hours') || error.includes('minutes'))}>
               <FormLabel fontSize="md" fontWeight="bold" color="gray.700">
@@ -304,35 +415,6 @@ export const VaultForm = () => {
               )}
             </FormControl>
           </MotionBox>
-        ) : (
-          <MotionBox initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
-            <FormControl id="target-price" isInvalid={!!error && error.includes('price')}>
-              <FormLabel fontSize="md" fontWeight="bold" color="gray.700">
-                Target Price (USD)
-              </FormLabel>
-              <HStack>
-                <ChakraInput
-                  type="number"
-                  value={targetPrice}
-                  onChange={(e) => handleInputChange(e, setTargetPrice)}
-                  placeholder="Enter target price in USD"
-                  min="0"
-                  step="1"
-                  size="lg"
-                  borderColor="gray.300"
-                  _hover={{ borderColor: "blue.300" }}
-                  _focus={{ borderColor: "blue.500", boxShadow: "0 0 0 1px #63B3ED" }}
-                />
-                <Text fontSize="lg" fontWeight="semibold" color="gray.600">USD</Text>
-              </HStack>
-              <Text mt={2} fontSize="sm" color="gray.500">
-                Current ETH price: ${currentEthPrice ? (Number(currentEthPrice) / 1e8).toFixed(2) : 'Loading...'}
-              </Text>
-              {error && error.includes('price') && (
-                <FormErrorMessage>{error}</FormErrorMessage>
-              )}
-            </FormControl>
-          </MotionBox>
         )}
 
         <MotionButton
@@ -346,7 +428,7 @@ export const VaultForm = () => {
           whileTap={{ scale: 0.98 }}
           shadow="md"
           _hover={{ shadow: 'lg' }}
-          isDisabled={!selectedWallet || !amount || (!isPriceLock && !unlockHours && !unlockMinutes) || (isPriceLock && !targetPrice)}
+          isDisabled={!selectedWallet || !amount || (!isPriceLock && !isGoalLock && !unlockHours && !unlockMinutes) || (isPriceLock && !targetPrice) || (isGoalLock && !usdGoal)}
         >
           Create Vault
         </MotionButton>

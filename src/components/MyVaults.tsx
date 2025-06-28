@@ -97,14 +97,18 @@ export const MyVaults = () => {
           return (
             <VaultCard
               key={vault.address}
-              vault={vault.address}
+              vault={vault.address as `0x${string}`}
               index={index}
               onClick={() => handleOpenModal(vault, index)}
               balance={vault.balance}
               isTimeLocked={vault.isTimeLocked}
               isPriceLocked={vault.isPriceLocked}
+              isGoalLocked={vault.isGoalLocked}
               unlockTime={vault.unlockTime}
               targetPrice={vault.targetPrice}
+              goalAmount={vault.goalAmount}
+              currentAmount={vault.currentAmount}
+              progressPercentage={vault.progressPercentage}
               currentPrice={Number(vault.currentPrice) / 1e8}
               isLocked={vault.isLocked}
             />

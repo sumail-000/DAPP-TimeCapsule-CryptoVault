@@ -8,8 +8,12 @@ interface VaultCardProps {
   balance?: bigint
   isTimeLocked?: boolean
   isPriceLocked?: boolean
+  isGoalLocked?: boolean
   unlockTime?: bigint
   targetPrice?: bigint
+  goalAmount?: bigint
+  currentAmount?: bigint
+  progressPercentage?: number
   currentPrice?: number
   isLocked?: boolean
 }
@@ -21,13 +25,18 @@ export const VaultCard = ({
   balance,
   isTimeLocked,
   isPriceLocked,
+  isGoalLocked,
   unlockTime,
   targetPrice,
+  goalAmount,
+  currentAmount,
+  progressPercentage,
   currentPrice,
   isLocked
 }: VaultCardProps) => {
   const formattedBalance = balance ? formatEther(balance) : '0'
   const formattedTargetPrice = targetPrice ? Number(targetPrice) / 1e8 : 0
+  const formattedGoalUsd = goalAmount && currentPrice ? ((Number(goalAmount) / 1e18) * currentPrice).toFixed(2) : undefined
 
   return (
     <Box
@@ -99,6 +108,11 @@ export const VaultCard = ({
               Price Lock
             </Badge>
           )}
+          {isGoalLocked && (
+            <Badge colorScheme="green" variant="subtle" px={3} py={1} borderRadius="full">
+              Goal Lock
+            </Badge>
+          )}
         </HStack>
 
         {isTimeLocked && unlockTime && (
@@ -121,6 +135,18 @@ export const VaultCard = ({
                 Current: <Text as="span" fontWeight="bold">${currentPrice.toFixed(2)}</Text>
               </Text>
             )}
+          </Box>
+        )}
+
+        {isGoalLocked && goalAmount && currentAmount !== undefined && progressPercentage !== undefined && (
+          <Box>
+            <Text fontSize="sm" color="gray.500">Goal</Text>
+            <Text fontWeight="semibold" color="gray.700">
+              {formattedGoalUsd ? `$${formattedGoalUsd}` : `${Number(goalAmount) / 1e18} ETH`}
+            </Text>
+            <Text fontSize="sm" color="gray.500" mt={1}>
+              Progress: <Text as="span" fontWeight="bold">{progressPercentage}%</Text>
+            </Text>
           </Box>
         )}
       </VStack>

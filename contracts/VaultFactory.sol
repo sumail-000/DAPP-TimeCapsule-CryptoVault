@@ -8,8 +8,8 @@ contract VaultFactory {
     
     event VaultCreated(address indexed user, address indexed vaultAddress);
     
-    function createVault(uint256 _unlockTime, uint256 _targetPrice, address _priceFeedAddress) external returns (address) {
-        TimeCapsuleVault vault = new TimeCapsuleVault(_unlockTime, msg.sender, _targetPrice, _priceFeedAddress);
+    function createVault(uint256 _unlockTime, uint256 _targetPrice, uint256 _targetAmount, address _priceFeedAddress) external returns (address) {
+        TimeCapsuleVault vault = new TimeCapsuleVault(_unlockTime, msg.sender, _targetPrice, _targetAmount, _priceFeedAddress);
         userVaults[msg.sender].push(address(vault));
         
         emit VaultCreated(msg.sender, address(vault));
@@ -22,7 +22,7 @@ contract VaultFactory {
 
     function removeVault(address _vaultAddress) external {
         TimeCapsuleVault vault = TimeCapsuleVault(_vaultAddress);
-        (bool locked, , , , ) = vault.getLockStatus();
+        (bool locked, , , , , , , , ) = vault.getLockStatus();
         require(!locked, "Vault is still locked");
         require(address(vault).balance == 0, "Vault is not empty");
 

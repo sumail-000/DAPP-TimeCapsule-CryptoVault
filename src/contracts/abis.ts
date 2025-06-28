@@ -17,6 +17,11 @@ export const TimeCapsuleVaultABI = [
         "type": "uint256"
       },
       {
+        "internalType": "uint256",
+        "name": "_targetAmount",
+        "type": "uint256"
+      },
+      {
         "internalType": "address",
         "name": "_priceFeedAddress",
         "type": "address"
@@ -24,6 +29,31 @@ export const TimeCapsuleVaultABI = [
     ],
     "stateMutability": "nonpayable",
     "type": "constructor"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "currentAmount",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "targetAmount",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "progressPercentage",
+        "type": "uint256"
+      }
+    ],
+    "name": "GoalProgress",
+    "type": "event"
   },
   {
     "anonymous": false,
@@ -122,9 +152,42 @@ export const TimeCapsuleVaultABI = [
         "type": "bool"
       },
       {
+        "internalType": "bool",
+        "name": "isGoalBased",
+        "type": "bool"
+      },
+      {
+        "internalType": "uint256",
+        "name": "currentAmount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "goalAmount",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "progressPercentage",
+        "type": "uint256"
+      },
+      {
         "internalType": "string",
         "name": "unlockReason",
         "type": "string"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "isGoalLock",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
       }
     ],
     "stateMutability": "view",
@@ -151,6 +214,19 @@ export const TimeCapsuleVaultABI = [
         "internalType": "contract AggregatorV3Interface",
         "name": "",
         "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "targetAmount",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -221,6 +297,11 @@ export const VaultFactoryABI = [
       {
         "internalType": "uint256",
         "name": "_targetPrice",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "_targetAmount",
         "type": "uint256"
       },
       {

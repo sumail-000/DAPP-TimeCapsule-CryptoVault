@@ -8,14 +8,18 @@ import { SUPPORTED_NETWORKS } from '../constants/networks'
 export interface VaultData {
   address: string;
   balance: bigint;
-  lockType: 'time' | 'price';
+  lockType: 'time' | 'price' | 'goal';
   unlockTime: bigint;
   targetPrice: bigint;
+  goalAmount: bigint;
+  currentAmount: bigint;
+  progressPercentage: number;
   currentPrice: bigint;
   remainingTime: number;
   creator: string;
   isTimeLocked: boolean;
   isPriceLocked: boolean;
+  isGoalLocked: boolean;
   isLocked: boolean;
   unlockReason: string;
 }
@@ -98,6 +102,8 @@ export const useVault = () => {
       
       // Get lock status
       const lockStatus = await vaultContract.getLockStatus();
+      // lockStatus: [locked, currentPrice, timeRemaining, isPriceBased, isGoalBased, currentAmount, goalAmount, progressPercentage, unlockReason]
+      const [locked, currentPrice, timeRemaining, isPriceBased, isGoalBased, currentAmount, goalAmount, progressPercentage, unlockReason] = lockStatus;
       
       // Get current price
       const currentPriceResult = await priceFeed.latestRoundData();
@@ -105,40 +111,30 @@ export const useVault = () => {
       const currentTime = Math.floor(Date.now() / 1000);
       const remainingSeconds = Number(unlockTime) - currentTime;
 
-      const isPriceLocked = lockStatus[3]; // isPriceBased
-      const isTimeLocked = lockStatus[0] && !isPriceLocked; // locked and not price based
-      
-      let unlockReasonCalculated = "";
-
-      if (isTimeLocked) {
-        unlockReasonCalculated = remainingSeconds > 0 
-          ? `Vault is time-locked. Unlocks in ${formatRemainingTime(remainingSeconds)}.`
-          : "Vault is unlocked by time.";
-      } else if (isPriceLocked) {
-        // Compare currentPriceResult[1] (current price from chainlink) with actualTargetPrice
-        // Both are bigints and should have the same decimal precision (1e8)
-        const isLockedByPrice = BigInt(currentPriceResult[1].toString()) < BigInt(actualTargetPrice.toString());
-        unlockReasonCalculated = isLockedByPrice 
-          ? `Vault is price-locked. Current price ($${(Number(currentPriceResult[1]) / 1e8).toFixed(2)}) is below target price ($${(Number(actualTargetPrice) / 1e8).toFixed(2)}).`
-          : `Vault is unlocked by price. Current price ($${(Number(currentPriceResult[1]) / 1e8).toFixed(2)}) is at or above target price ($${(Number(actualTargetPrice) / 1e8).toFixed(2)}).`;
-      } else {
-        // Fallback for unexpected scenarios, use contract's unlock reason
-        unlockReasonCalculated = lockStatus[4];
-      }
+      const isPriceLocked = isPriceBased;
+      const isGoalLocked = isGoalBased;
+      const isTimeLocked = locked && !isPriceLocked && !isGoalLocked;
+      let lockType: 'time' | 'price' | 'goal' = 'time';
+      if (isPriceLocked) lockType = 'price';
+      if (isGoalLocked) lockType = 'goal';
 
       return {
         address: vaultAddress,
         balance: BigInt(balance.toString()),
         unlockTime: BigInt(unlockTime.toString()),
         targetPrice: BigInt(actualTargetPrice.toString()),
+        goalAmount: BigInt(goalAmount?.toString() || '0'),
+        currentAmount: BigInt(currentAmount?.toString() || '0'),
+        progressPercentage: Number(progressPercentage),
         currentPrice: BigInt(currentPriceResult[1].toString()),
         remainingTime: remainingSeconds > 0 ? remainingSeconds : 0,
         creator,
         isTimeLocked,
         isPriceLocked,
-        lockType: isPriceLocked ? 'price' : 'time',
-        isLocked: lockStatus[0],
-        unlockReason: unlockReasonCalculated,
+        isGoalLocked,
+        lockType,
+        isLocked: locked,
+        unlockReason: unlockReason,
       };
     } catch (err) {
       console.error(`Error fetching details for vault ${vaultAddress}:`, err);
@@ -202,7 +198,11 @@ export const useVault = () => {
     return `${h}h ${m}m ${s}s`;
   };
 
-  const createNewVault = async (unlockTime: number, targetPrice: number): Promise<string | undefined> => {
+  const createNewVault = async (
+    unlockTime: number,
+    targetPrice: number,
+    targetAmount: number = 0
+  ): Promise<string | undefined> => {
     if (!signer || !provider || !selectedWallet) {
       setError('No wallet selected');
       return;
@@ -212,13 +212,16 @@ export const useVault = () => {
     setError(null);
 
     try {
+      console.log('Starting vault creation with params:', { unlockTime, targetPrice, targetAmount });
+      
       // First verify if the factory contract exists
       const code = await provider.getCode(VAULT_FACTORY_ADDRESS);
       if (!code || code === '0x') {
-        console.error('Vault factory contract not deployed at the specified address');
         setError('Vault factory contract not deployed. Please deploy the contract first.');
         return;
       }
+
+      console.log('Contract exists, creating vault...');
 
       // Create the vault
       const factoryContract = new ethers.Contract(
@@ -226,10 +229,13 @@ export const useVault = () => {
         VaultFactoryABI,
         signer
       );
+
+      console.log('Calling createVault with params:', [unlockTime, targetPrice, targetAmount, ETH_USD_PRICE_FEED]);
       
       const tx = await factoryContract.createVault(
-        unlockTime,
-        targetPrice,
+        BigInt(unlockTime),
+        BigInt(targetPrice),
+        BigInt(targetAmount),
         ETH_USD_PRICE_FEED
       );
 
@@ -239,16 +245,11 @@ export const useVault = () => {
       const receipt = await tx.wait();
       console.log('Transaction confirmed:', receipt);
 
-      // Get the vault address by querying the contract directly instead of relying on logs
-      // This is more robust as it doesn't depend on specific event signatures
+      // Get the vault address by querying the contract directly
       const userVaults = await factoryContract.getUserVaults(selectedWallet.address);
-      
-      // The most recently created vault should be the last one in the array
       if (!userVaults || userVaults.length === 0) {
         throw new Error('No vaults found after creation. Please try again.');
       }
-      
-      // Get the most recently created vault address
       const vaultAddress = userVaults[userVaults.length - 1];
       console.log('New vault created at:', vaultAddress);
 
@@ -261,7 +262,9 @@ export const useVault = () => {
       return vaultAddress;
     } catch (err) {
       console.error('Error creating new vault:', err);
-      setError(getContractError(err));
+      const errorMessage = getContractError(err);
+      console.error('Parsed error message:', errorMessage);
+      setError(errorMessage);
       return undefined;
     } finally {
       setIsLoading(false);
@@ -324,17 +327,21 @@ export const useVault = () => {
     setError(null);
 
     try {
-      const vaultContract = new ethers.Contract(
-        vaultAddress,
-        TimeCapsuleVaultABI,
-        signer
-      );
+      const vaultContract = new ethers.Contract(vaultAddress, TimeCapsuleVaultABI, signer);
 
       // Check if vault is unlocked
       const lockStatus = await vaultContract.getLockStatus();
       if (lockStatus[0]) {
-        throw new Error(`Vault is still locked: ${lockStatus[4]}`);
+        throw new Error(`Vault is still locked: ${lockStatus[8]}`); // unlockReason is at index 8
       }
+
+      // Check if vault has balance
+      const balance = await provider.getBalance(vaultAddress);
+      if (balance === 0n) {
+        throw new Error('Vault has no balance to withdraw');
+      }
+
+      console.log(`Withdrawing ${ethers.formatEther(balance)} ETH from vault ${vaultAddress}`);
 
       // Withdraw funds
       const tx = await vaultContract.withdraw();
@@ -350,7 +357,8 @@ export const useVault = () => {
       return true;
     } catch (err) {
       console.error('Error withdrawing from vault:', err);
-      setError(getContractError(err));
+      const errorMessage = getContractError(err);
+      setError(errorMessage);
       return false;
     } finally {
       setIsLoading(false);
@@ -363,19 +371,32 @@ export const useVault = () => {
 
     const interval = setInterval(async () => {
       for (const vault of vaults) {
+        // Only attempt withdrawal if vault is unlocked, has balance, and hasn't been auto-withdrawn
         if (!vault.isLocked && vault.balance > 0n && !autoWithdrawnVaults.current.has(vault.address)) {
           try {
-            // Attempt to withdraw
-            await withdraw(vault.address);
-            autoWithdrawnVaults.current.add(vault.address);
-            // Optionally, you could show a toast here if you want user feedback
+            console.log(`Attempting auto-withdrawal from vault ${vault.address}`);
+            
+            // Double-check the vault status before withdrawing
+            const vaultContract = new ethers.Contract(vault.address, TimeCapsuleVaultABI, provider);
+            const lockStatus = await vaultContract.getLockStatus();
+            
+            // Only proceed if the vault is actually unlocked
+            if (!lockStatus[0]) { // locked = false
+              await withdraw(vault.address);
+              autoWithdrawnVaults.current.add(vault.address);
+              console.log(`Auto-withdrawal successful for vault ${vault.address}`);
+            } else {
+              console.log(`Vault ${vault.address} is still locked, skipping auto-withdrawal`);
+            }
           } catch (err) {
-            // Optionally handle error (e.g., log or show toast)
-            // Do not add to autoWithdrawnVaults so it will retry next poll
+            console.error(`Auto-withdrawal failed for vault ${vault.address}:`, err);
+            // Don't add to autoWithdrawnVaults so it will retry next poll
+            // But add a small delay to prevent spam
+            await new Promise(resolve => setTimeout(resolve, 5000));
           }
         }
       }
-    }, 10000); // Every 10 seconds
+    }, 30000); // Check every 30 seconds instead of 10
 
     return () => clearInterval(interval);
   }, [signer, provider, selectedWallet, vaults]);
