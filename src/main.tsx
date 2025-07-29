@@ -38,7 +38,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ChakraProvider theme={theme}>
       <Global styles={globalStyles} />
-      <App />
+    <App />
     </ChakraProvider>
   </React.StrictMode>,
 )
