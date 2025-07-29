@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Box,
   VStack,
@@ -16,17 +16,11 @@ import {
   TabPanels,
   Tab,
   TabPanel,
-  Table,
-  Thead,
-  Tbody,
-  Tr,
-  Th,
-  Td,
+
   FormHelperText,
   useClipboard,
   IconButton,
   Tooltip,
-  Select,
   Modal,
   ModalOverlay,
   ModalContent,
@@ -46,30 +40,27 @@ import {
   CardBody,
   Grid,
   GridItem,
-  Flex,
   Divider,
   InputGroup,
   InputRightElement,
-  Code,
-  Switch,
-  Stat,
-  StatLabel,
-  StatNumber,
-  StatHelpText,
-  Skeleton,
   Spinner,
   Alert,
   AlertIcon,
+  Container,
+  Icon,
+  Progress,
 } from '@chakra-ui/react';
 import { ethers } from 'ethers';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { FaCopy, FaEye, FaEyeSlash, FaQrcode, FaExchangeAlt, FaTrash, FaKey, FaEdit, FaDownload, FaInfoCircle, FaSync, FaCheck, FaGasPump } from 'react-icons/fa';
+import { FaCopy, FaEye, FaEyeSlash, FaExchangeAlt, FaTrash, FaKey, FaInfoCircle, FaSync, FaCheck, FaGasPump, FaWallet } from 'react-icons/fa';
 import { QRCodeSVG } from 'qrcode.react';
-import { SUPPORTED_NETWORKS, Network } from '../constants/networks';
+import { SUPPORTED_NETWORKS } from '../constants/networks';
 import { estimateGasFee, GasEstimate, sendTransaction } from '../utils/wallet';
+import TransactionHistory from './TransactionHistory';
 
 const MotionBox = motion.create(Box);
+const MotionCard = motion.create(Card);
 
 interface Transaction {
   hash: string;
@@ -106,7 +97,6 @@ export const WalletDetail = () => {
   const [isEstimatingGas, setIsEstimatingGas] = useState(false);
   const addressClipboard = useClipboard(wallet?.address || '');
   const privateKeyClipboard = useClipboard(wallet?.privateKey || '');
-  const [savedWallets, setSavedWallets] = useState<WalletData[]>([]);
   const toast = useToast();
   const navigate = useNavigate();
   
@@ -130,10 +120,7 @@ export const WalletDetail = () => {
   }, [address]);
 
   const loadAllWallets = () => {
-    const savedWalletsData = localStorage.getItem('wallets');
-    if (savedWalletsData) {
-      setSavedWallets(JSON.parse(savedWalletsData));
-    }
+    // This function is kept for future use but currently not needed
   };
 
   const loadWallet = async () => {
@@ -216,7 +203,6 @@ export const WalletDetail = () => {
         w.address === updatedWallet.address ? updatedWallet : w
       );
       localStorage.setItem('wallets', JSON.stringify(updatedWallets));
-      setSavedWallets(updatedWallets);
       setWallet(updatedWallet);
     }
   };
@@ -515,14 +501,22 @@ export const WalletDetail = () => {
         status: 'success',
         duration: 5000,
       });
-    } catch (error) {
-      console.error('Error sending transaction:', error);
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Failed to send transaction',
-        status: 'error',
-        duration: 5000,
-      });
+    } catch (err) {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 4001) {
+        toast({
+          title: 'Transaction cancelled',
+          description: 'You cancelled the wallet transaction.',
+          status: 'info',
+          duration: 4000,
+        });
+      } else {
+        toast({
+          title: 'Error',
+          description: err instanceof Error ? err.message : 'Failed to send transaction',
+          status: 'error',
+          duration: 5000,
+        });
+      }
     } finally {
       setIsSending(false);
     }
@@ -561,53 +555,7 @@ export const WalletDetail = () => {
     }
   };
 
-  const truncateAddress = (address: string) => {
-    return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
-  };
-  
-  const formatDate = (timestamp: number) => {
-    return new Date(timestamp).toLocaleString();
-  };
-  
-  const formatTimeAgo = (timestamp: number) => {
-    const now = Date.now();
-    const diff = now - timestamp;
-    
-    // Convert to seconds
-    const seconds = Math.floor(diff / 1000);
-    
-    if (seconds < 60) {
-      return 'just now';
-    }
-    
-    // Convert to minutes
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) {
-      return `${minutes} min${minutes > 1 ? 's' : ''} ago`;
-    }
-    
-    // Convert to hours
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) {
-      return `${hours} hr${hours > 1 ? 's' : ''} ago`;
-    }
-    
-    // Convert to days
-    const days = Math.floor(hours / 24);
-    if (days < 30) {
-      return `${days} day${days > 1 ? 's' : ''} ago`;
-    }
-    
-    // Convert to months
-    const months = Math.floor(days / 30);
-    if (months < 12) {
-      return `${months} month${months > 1 ? 's' : ''} ago`;
-    }
-    
-    // Convert to years
-    const years = Math.floor(months / 12);
-    return `${years} year${years > 1 ? 's' : ''} ago`;
-  };
+
 
   if (isLoading) {
     return (
@@ -629,20 +577,63 @@ export const WalletDetail = () => {
   const network = SUPPORTED_NETWORKS.find(n => n.id === wallet.network);
 
   return (
-    <Box p={8}>
-      <Grid templateColumns={{ base: "1fr", md: "1fr 2fr" }} gap={6}>
+    <Box 
+      minH="100vh" 
+      bgGradient="linear(to-br, gray.50, purple.50)"
+      py={8}
+    >
+      <Container maxW="7xl">
+        <VStack spacing={8} align="stretch">
+          {/* Header Section */}
+          <MotionBox
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <VStack spacing={4} textAlign="center">
+              <HStack spacing={3}>
+                <Icon as={FaWallet} color="purple.500" boxSize={8} />
+                <Heading size="xl" color="gray.800">Wallet Details</Heading>
+              </HStack>
+              <Text color="gray.600" fontSize="lg">
+                Manage your wallet and transactions
+              </Text>
+            </VStack>
+          </MotionBox>
+
+          <Grid templateColumns={{ base: "1fr", md: "1fr 2fr" }} gap={8}>
         <GridItem>
-          <VStack spacing={6} align="stretch">
-            <Card variant="outline" borderRadius="xl" overflow="hidden" boxShadow="lg">
-              <CardHeader bg="purple.500" color="white">
+              <MotionCard
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.5 }}
+                bg="white"
+                borderColor="gray.200"
+                borderRadius="xl"
+                overflow="hidden"
+                boxShadow="xl"
+              >
+                <CardHeader 
+                  bgGradient="linear(to-r, purple.500, blue.500)" 
+                  color="white"
+                  pb={4}
+                >
+                  <VStack spacing={2} align="start">
+                    <HStack spacing={3}>
+                      <Icon as={FaWallet} boxSize={6} />
                 <Heading size="md">Wallet Information</Heading>
+                    </HStack>
+                    <Badge colorScheme="whiteAlpha" variant="solid" borderRadius="full">
+                      {network?.name || wallet.network}
+                    </Badge>
+                  </VStack>
               </CardHeader>
-              <CardBody>
-                <VStack spacing={4} align="stretch">
+                <CardBody p={6}>
+                  <VStack spacing={6} align="stretch">
                   {/* ADDRESS */}
                   <Box>
-                    <HStack mb={1}>
-                      <Text fontSize="sm" color="gray.500">Address</Text>
+                      <HStack mb={2} justify="space-between">
+                        <Text fontSize="sm" color="gray.600" fontWeight="medium">Address</Text>
                       <Tooltip hasArrow label="Copy to clipboard">
                         <IconButton 
                           aria-label="Copy address" 
@@ -650,26 +641,28 @@ export const WalletDetail = () => {
                           size="xs" 
                           onClick={addressClipboard.onCopy}
                           colorScheme={addressClipboard.hasCopied ? "green" : "gray"}
+                            borderRadius="full"
                         />
                       </Tooltip>
                     </HStack>
-                    <Code p={2} borderRadius="md" w="100%" fontSize="xs" isTruncated>
+                      <Box 
+                        p={3} 
+                        bg="gray.50" 
+                        borderRadius="lg" 
+                        border="1px" 
+                        borderColor="gray.200"
+                        fontFamily="mono"
+                        fontSize="xs"
+                        textAlign="center"
+                      >
                       {wallet.address}
-                    </Code>
                   </Box>
-                  
-                  {/* NETWORK */}
-                  <Box>
-                    <Text fontSize="sm" color="gray.500" mb={1}>Network</Text>
-                    <Badge colorScheme="purple" px={2} py={1}>
-                      {network?.name || wallet.network}
-                    </Badge>
                   </Box>
                   
                   {/* BALANCE */}
                   <Box>
-                    <HStack mb={1}>
-                      <Text fontSize="sm" color="gray.500">Balance</Text>
+                      <HStack mb={2} justify="space-between">
+                        <Text fontSize="sm" color="gray.600" fontWeight="medium">Balance</Text>
                       <Tooltip hasArrow label="Refresh balance">
                         <IconButton 
                           aria-label="Refresh balance" 
@@ -677,30 +670,46 @@ export const WalletDetail = () => {
                           size="xs" 
                           onClick={() => refreshBalance()} 
                           isLoading={isRefreshing}
+                            borderRadius="full"
                         />
                       </Tooltip>
                     </HStack>
-                    <Heading size="md">{balance} {network?.currency || 'ETH'}</Heading>
+                      <VStack spacing={2}>
+                        <Heading size="lg" color="gray.800">
+                          {balance} {network?.currency || 'ETH'}
+                        </Heading>
+                        <Progress 
+                          value={Math.min((parseFloat(balance) / 1) * 100, 100)} 
+                          size="sm" 
+                          colorScheme="purple"
+                          borderRadius="full"
+                          w="100%"
+                        />
+                      </VStack>
                   </Box>
                   
                   {/* QR CODE */}
                   <Box alignSelf="center" pt={2}>
+                      <VStack spacing={3}>
+                        <Box p={4} bg="white" borderRadius="lg" boxShadow="md">
                     <QRCodeSVG
                       value={wallet.address}
-                      size={150}
+                            size={120}
                       level="H"
                       includeMargin={true}
                       bgColor="#FFFFFF"
                       fgColor="#000000"
                     />
-                    <Text fontSize="xs" color="gray.500" textAlign="center" mt={2}>
+                        </Box>
+                        <Text fontSize="xs" color="gray.500" textAlign="center">
                       Scan to send funds to this wallet
                     </Text>
+                      </VStack>
                   </Box>
                 </VStack>
                 
                 {/* ACTIONS */}
-                <Divider my={4} />
+                  <Divider my={6} />
                 
                 <VStack spacing={3}>
                   <Button 
@@ -710,6 +719,9 @@ export const WalletDetail = () => {
                     variant="outline"
                     onClick={onOpenExport}
                     width="100%"
+                      borderRadius="full"
+                      _hover={{ transform: 'translateY(-1px)' }}
+                      transition="all 0.2s"
                   >
                     Export Private Key
                   </Button>
@@ -721,44 +733,69 @@ export const WalletDetail = () => {
                     variant="outline"
                     onClick={onOpenDeleteDialog}
                     width="100%"
+                      borderRadius="full"
+                      _hover={{ transform: 'translateY(-1px)' }}
+                      transition="all 0.2s"
                   >
                     Delete Wallet
                   </Button>
                 </VStack>
               </CardBody>
-            </Card>
-          </VStack>
+              </MotionCard>
         </GridItem>
         
         <GridItem>
+          <MotionBox
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.5, delay: 0.1 }}
+          >
           <Tabs variant="enclosed" colorScheme="purple" isLazy>
-            <TabList>
-              <Tab>Send</Tab>
-              <Tab>Transactions</Tab>
+              <TabList bg="white" borderRadius="lg" p={1} boxShadow="md">
+                <Tab 
+                  _selected={{ bg: 'purple.500', color: 'white' }}
+                  borderRadius="md"
+                  fontWeight="semibold"
+                >
+                  Send
+                </Tab>
+                <Tab 
+                  _selected={{ bg: 'purple.500', color: 'white' }}
+                  borderRadius="md"
+                  fontWeight="semibold"
+                >
+                  Transactions
+                </Tab>
             </TabList>
 
             <TabPanels>
-              <TabPanel>
-                <Card variant="outline">
+                <TabPanel px={0} pt={6}>
+                  <Card bg="white" borderColor="gray.200" borderRadius="xl" boxShadow="lg">
                   <CardHeader>
+                      <HStack spacing={3}>
+                        <Icon as={FaExchangeAlt} color="purple.500" boxSize={6} />
                     <Heading size="md">Send {network?.currency || 'ETH'}</Heading>
+                      </HStack>
                   </CardHeader>
                   <CardBody>
-                    <VStack spacing={4} align="stretch">
+                      <VStack spacing={6} align="stretch">
                       <FormControl isRequired>
-                        <FormLabel>Recipient Address</FormLabel>
+                          <FormLabel color="gray.700" fontWeight="medium">Recipient Address</FormLabel>
                         <Input
                           value={recipient}
                           onChange={(e) => setRecipient(e.target.value)}
                           placeholder="0x..."
                           size="lg"
+                            borderRadius="lg"
+                            borderColor="gray.300"
+                            _focus={{ borderColor: 'purple.500', boxShadow: '0 0 0 1px var(--chakra-colors-purple-500)' }}
                         />
-                        <FormHelperText>Enter the full Ethereum address</FormHelperText>
+                          <FormHelperText color="gray.500">Enter the full Ethereum address</FormHelperText>
                       </FormControl>
 
                       <FormControl isRequired>
-                        <FormLabel>Amount ({network?.currency || 'ETH'})</FormLabel>
-                        <InputGroup>
+                          <FormLabel color="gray.700" fontWeight="medium">Amount ({network?.currency || 'ETH'})</FormLabel>
+                          <InputGroup size="lg">
                           <Input
                             type="number"
                             value={amount}
@@ -766,21 +803,20 @@ export const WalletDetail = () => {
                               setAmount(e.target.value);
                             }}
                             placeholder="0.0"
-                            size="lg"
                             min="0"
                             step="0.0001"
+                              borderRadius="lg"
+                              borderColor="gray.300"
+                              _focus={{ borderColor: 'purple.500', boxShadow: '0 0 0 1px var(--chakra-colors-purple-500)' }}
                           />
-                          <InputRightElement width="4.5rem" h="100%">
+                            <InputRightElement width="5rem" h="100%">
                             <Button 
-                              h="1.75rem" 
+                                h="2.5rem" 
                               size="sm" 
                               onClick={() => {
-                                // If there's already an amount, clear it
-                                // Otherwise set to maximum
                                 if (amount && parseFloat(amount) > 0) {
                                   setAmount("");
                                 } else {
-                                  // Calculate max amount considering gas fees
                                   if (gasEstimate) {
                                     setAmount(gasEstimate.maxAmount);
                                   } else {
@@ -789,46 +825,46 @@ export const WalletDetail = () => {
                                 }
                               }}
                               colorScheme={amount && parseFloat(amount) > 0 ? "gray" : "blue"}
+                                borderRadius="full"
+                                fontSize="sm"
                             >
                               {amount && parseFloat(amount) > 0 ? "Clear" : "Max"}
                             </Button>
                           </InputRightElement>
                         </InputGroup>
-                        <FormHelperText>Available: {balance} {network?.currency || 'ETH'}</FormHelperText>
+                          <FormHelperText color="gray.500">Available: {balance} {network?.currency || 'ETH'}</FormHelperText>
                       </FormControl>
                       
                       {/* Gas Fee Estimate */}
                       <Box 
-                        p={4} 
-                        borderRadius="md" 
+                          p={6} 
+                          borderRadius="xl" 
                         borderWidth="1px" 
                         borderColor="gray.200"
                         bg="gray.50"
                       >
-                        <HStack justifyContent="space-between" mb={3}>
-                          <Heading size="sm">
-                            <HStack>
-                              <FaGasPump />
-                              <Text>Transaction Details</Text>
+                          <HStack justifyContent="space-between" mb={4}>
+                            <HStack spacing={2}>
+                              <Icon as={FaGasPump} color="purple.500" />
+                              <Heading size="sm" color="gray.700">Transaction Details</Heading>
                             </HStack>
-                          </Heading>
-                          {isEstimatingGas && <Spinner size="sm" />}
+                            {isEstimatingGas && <Spinner size="sm" color="purple.500" />}
                         </HStack>
                         
                         {gasEstimate ? (
-                          <VStack align="stretch" spacing={3}>
-                            <Grid templateColumns="1fr 1fr" gap={4}>
+                            <VStack align="stretch" spacing={4}>
+                              <Grid templateColumns="1fr 1fr" gap={6}>
                               <GridItem>
-                                <VStack align="start" spacing={1}>
-                                  <Text fontSize="sm" color="gray.600">You Send:</Text>
-                                  <Text fontWeight="bold">{amount} ETH</Text>
+                                  <VStack align="start" spacing={2}>
+                                    <Text fontSize="sm" color="gray.600" fontWeight="medium">You Send:</Text>
+                                    <Text fontSize="lg" fontWeight="bold" color="gray.800">{amount} ETH</Text>
                                 </VStack>
                               </GridItem>
                               
                               <GridItem>
-                                <VStack align="start" spacing={1}>
-                                  <Text fontSize="sm" color="gray.600">Receive:</Text>
-                                  <Text fontWeight="bold">{amount} ETH</Text>
+                                  <VStack align="start" spacing={2}>
+                                    <Text fontSize="sm" color="gray.600" fontWeight="medium">Recipient Gets:</Text>
+                                    <Text fontSize="lg" fontWeight="bold" color="gray.800">{amount} ETH</Text>
                                 </VStack>
                               </GridItem>
                             </Grid>
@@ -836,18 +872,17 @@ export const WalletDetail = () => {
                             <Divider />
                             
                             <HStack justify="space-between">
-                              <VStack align="start" spacing={0}>
-                                <Text fontSize="sm" color="gray.600">Network Fee:</Text>
+                                <VStack align="start" spacing={1}>
+                                  <Text fontSize="sm" color="gray.600" fontWeight="medium">Network Fee:</Text>
                                 <Text fontSize="xs" color="gray.500">
-                                  (~$
-                                  {(parseFloat(gasEstimate.gasCostEther) * 2000).toFixed(2)})
+                                    (~${gasEstimate && !isNaN(parseFloat(gasEstimate.gasCostEther)) ? (parseFloat(gasEstimate.gasCostEther) * 2000).toFixed(2) : '0.00'})
                                 </Text>
                               </VStack>
-                              <Text fontWeight="bold">{gasEstimate.gasCostEther} ETH</Text>
+                                <Text fontSize="lg" fontWeight="bold" color="gray.800">{gasEstimate.gasCostEther} ETH</Text>
                             </HStack>
                             
                             {parseFloat(amount) > parseFloat(gasEstimate.maxAmount) && (
-                              <Alert status="warning" borderRadius="md" size="sm">
+                                <Alert status="warning" borderRadius="lg" variant="left-accent">
                                 <AlertIcon />
                                 <Text fontSize="sm">
                                   The amount exceeds your available balance after gas fees.
@@ -856,7 +891,7 @@ export const WalletDetail = () => {
                             )}
                           </VStack>
                         ) : (
-                          <Text fontSize="sm" color="gray.500">
+                            <Text fontSize="sm" color="gray.500" textAlign="center" py={4}>
                             Enter a valid address and amount to see transaction details
                           </Text>
                         )}
@@ -875,7 +910,10 @@ export const WalletDetail = () => {
                           (gasEstimate && parseFloat(amount) > parseFloat(gasEstimate.maxAmount)) ||
                           isEstimatingGas
                         }
-                        mt={4}
+                          borderRadius="full"
+                          boxShadow="lg"
+                          _hover={{ transform: 'translateY(-2px)', boxShadow: 'xl' }}
+                          transition="all 0.2s"
                         leftIcon={<FaExchangeAlt />}
                       >
                         Send {amount || 0} ETH
@@ -886,129 +924,18 @@ export const WalletDetail = () => {
               </TabPanel>
               
               <TabPanel>
-                <Card variant="outline">
-                  <CardHeader>
-                    <Heading size="md">Transaction History</Heading>
-                  </CardHeader>
-                  <CardBody>
-                    {transactions.length > 0 ? (
-                      <Box overflowX="auto">
-                        <Table size="sm" variant="simple">
-                          <Thead>
-                            <Tr>
-                              <Th>Type</Th>
-                              <Th>Amount</Th>
-                              <Th>Address</Th>
-                              <Th>Date</Th>
-                              <Th>Gas Fee</Th>
-                              <Th>Status</Th>
-                              <Th>Actions</Th>
-                            </Tr>
-                          </Thead>
-                          <Tbody>
-                            {transactions.map((tx) => (
-                              <Tr key={tx.hash}>
-                                <Td>
-                                  <Badge colorScheme={tx.from === wallet.address ? "red" : "green"}>
-                                    {tx.from === wallet.address ? "Sent" : "Received"}
-                                  </Badge>
-                                </Td>
-                                <Td fontWeight="medium">
-                                  {parseFloat(tx.value).toFixed(6)} {network?.currency || 'ETH'}
-                                </Td>
-                                <Td isTruncated maxW="150px">
-                                  <Tooltip hasArrow label={tx.from === wallet.address ? tx.to : tx.from}>
-                                    <Text>
-                                      {tx.from === wallet.address 
-                                        ? truncateAddress(tx.to)
-                                        : truncateAddress(tx.from)}
-                                    </Text>
-                                  </Tooltip>
-                                </Td>
-                                <Td>
-                                  <Tooltip hasArrow label={new Date(tx.timestamp).toLocaleString()}>
-                                    <Text fontSize="sm">{formatTimeAgo(tx.timestamp)}</Text>
-                                  </Tooltip>
-                                </Td>
-                                <Td>
-                                  {tx.gasUsed ? (
-                                    <Tooltip hasArrow label={`${tx.gasPrice} Gwei`}>
-                                      <Text fontSize="sm">{parseFloat(tx.gasUsed).toFixed(6)} ETH</Text>
-                                    </Tooltip>
-                                  ) : (
-                                    <Text fontSize="sm">-</Text>
-                                  )}
-                                </Td>
-                                <Td>
-                                  <Badge 
-                                    colorScheme={
-                                      tx.status === 'confirmed' ? 'green' : 
-                                      tx.status === 'pending' ? 'yellow' : 'red'
-                                    }
-                                  >
-                                    {tx.status}
-                                  </Badge>
-                                </Td>
-                                <Td>
-                                  <HStack spacing={1}>
-                                    <Tooltip hasArrow label="View on Explorer">
-                                      <IconButton
-                                        aria-label="View on explorer"
-                                        icon={<FaExchangeAlt />}
-                                        size="xs"
-                                        variant="ghost"
-                                        onClick={() => {
-                                          const network = SUPPORTED_NETWORKS.find(n => n.id === tx.network);
-                                          if (network?.explorer) {
-                                            window.open(`${network.explorer}/tx/${tx.hash}`, '_blank');
-                                          }
-                                        }}
+                <TransactionHistory 
+                  walletAddress={wallet?.address || ''} 
+                  network={wallet?.network || 'sepolia'} 
                                       />
-                                    </Tooltip>
-                                    <Tooltip hasArrow label="Copy Transaction Hash">
-                                      <IconButton
-                                        aria-label="Copy transaction hash"
-                                        icon={<FaCopy />}
-                                        size="xs"
-                                        variant="ghost"
-                                        onClick={() => {
-                                          navigator.clipboard.writeText(tx.hash);
-                                          toast({
-                                            title: "Transaction hash copied",
-                                            status: "success",
-                                            duration: 2000,
-                                          });
-                                        }}
-                                      />
-                                    </Tooltip>
-                                  </HStack>
-                                </Td>
-                              </Tr>
-                            ))}
-                          </Tbody>
-                        </Table>
-                      </Box>
-                    ) : (
-                      <VStack py={8} spacing={4}>
-                        <Text textAlign="center" color="gray.500">
-                          No transactions found for this wallet
-                        </Text>
-                        <Button 
-                          leftIcon={<FaSync />} 
-                          size="sm"
-                          onClick={() => loadTransactions(wallet.address)}
-                        >
-                          Refresh Transactions
-                        </Button>
-                      </VStack>
-                    )}
-                  </CardBody>
-                </Card>
               </TabPanel>
             </TabPanels>
           </Tabs>
+          </MotionBox>
         </GridItem>
       </Grid>
+        </VStack>
+      </Container>
       
       {/* Export Private Key Modal */}
       <Modal isOpen={isExportOpen} onClose={onCloseExport} size="md">

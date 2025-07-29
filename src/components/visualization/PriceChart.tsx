@@ -22,6 +22,10 @@ const PriceChart = ({ targetPrice, currentPrice, isPriceLocked }: PriceChartProp
   const lineColor = useColorModeValue('purple.500', 'purple.300');
   const gridColor = useColorModeValue('gray.200', 'gray.600');
   const referenceLineColor = useColorModeValue('red.500', 'red.300');
+  const boxBg = useColorModeValue('white', 'gray.700');
+  const xAxisStroke = useColorModeValue('gray.500', 'gray.400');
+  const yAxisStroke = useColorModeValue('gray.500', 'gray.400');
+  const textColor = useColorModeValue('gray.600', 'gray.300');
   
   // Fetch historical price data
   useEffect(() => {
@@ -83,7 +87,7 @@ const PriceChart = ({ targetPrice, currentPrice, isPriceLocked }: PriceChartProp
   }
   
   return (
-    <Box p={4} borderRadius="lg" bg={useColorModeValue('white', 'gray.700')} shadow="sm" mb={6}>
+    <Box p={4} borderRadius="lg" bg={boxBg} shadow="sm" mb={6}>
       <Heading size="md" mb={4}>ETH Price History</Heading>
       
       <Box height="300px">
@@ -96,11 +100,11 @@ const PriceChart = ({ targetPrice, currentPrice, isPriceLocked }: PriceChartProp
             <XAxis 
               dataKey="timestamp" 
               tickFormatter={formatXAxis} 
-              stroke={useColorModeValue('gray.500', 'gray.400')}
+              stroke={xAxisStroke}
             />
             <YAxis 
               domain={['auto', 'auto']}
-              stroke={useColorModeValue('gray.500', 'gray.400')}
+              stroke={yAxisStroke}
             />
             <Tooltip 
               formatter={formatTooltip}
@@ -147,7 +151,7 @@ const PriceChart = ({ targetPrice, currentPrice, isPriceLocked }: PriceChartProp
       </Box>
       
       {isPriceLocked && (
-        <Text fontSize="sm" mt={2} color={useColorModeValue('gray.600', 'gray.300')}>
+        <Text fontSize="sm" mt={2} color={textColor}>
           {targetPrice > currentPrice 
             ? `ETH needs to increase by $${((targetPrice - currentPrice) / 1e8).toFixed(2)} to unlock this vault.`
             : 'Target price reached! Vault can be unlocked.'}

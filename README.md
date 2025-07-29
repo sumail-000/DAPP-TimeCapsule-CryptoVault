@@ -1,173 +1,105 @@
-# Time Capsule Vault
+# TimeCapsule CryptoVault 🔐
 
-A decentralized application that allows users to create time-locked or price-locked vaults for ETH.
+> **Programmable cryptocurrency vaults with time, price, and goal-based unlocking conditions**
 
-## Features
+A secure, user-friendly DApp that enables sophisticated crypto asset management through smart contract automation. Built on Ethereum with Chainlink oracle integration.
 
-- Create time-locked vaults (unlock after a specific date)
-- Create price-locked vaults (unlock when ETH reaches a target price)
-- Deposit ETH into vaults
-- Withdraw ETH when conditions are met
-- View all your vaults and their status
+## Project Structure
 
-## Prerequisites
+### DApp (`/`)
+- **Component**: `src/components/DAppLayout.tsx`
+- **Purpose**: Full DApp functionality with dashboard
+- **Features**:
+  - Dashboard overview (`/`)
+  - Wallet management (`/wallet`)
+  - Vault creation (`/create-vault`)
+  - Vault management (`/my-vaults`)
+  - Network selection
+  - Blockchain interactions
 
-- Node.js and npm
-- Metamask or another Web3 wallet
-- Sepolia testnet ETH
+## Key Features
 
-## Setup and Installation
+### Dashboard
+- 📊 Overview statistics (total vaults, wallets, ETH locked/withdrawn)
+- 📈 Recent vault activity
+- ⚡ Quick action buttons
+- 🎨 Modern dark theme interface
 
-1. Clone the repository and install dependencies:
+### DApp Functionality
+- 💼 Multi-wallet support
+- 🔐 Time-locked vaults
+- 💰 Price-locked vaults
+- ⏰ Combined time/price conditions
+- 🔄 Auto-withdrawal functionality
+- 🌐 Multi-chain support
 
+## Technology Stack
+
+- **Frontend**: React + TypeScript
+- **UI Framework**: Chakra UI
+- **Animations**: Framer Motion
+- **Blockchain**: Ethers.js
+- **Routing**: React Router
+- **State Management**: React Context + Local Storage
+
+## Getting Started
+
+1. **Install dependencies**:
 ```bash
-git clone <repository-url>
-cd timecapsule-vault-frontend
 npm install
 ```
 
-2. Configure environment variables:
-
-Copy the `.env.example` file to `.env` and fill in your values:
-
-```
-SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY
-PRIVATE_KEY=YOUR_PRIVATE_KEY_FOR_DEPLOYMENT
-```
-
-⚠️ **WARNING:** Never commit your private key or API keys to source control. Keep your `.env` file in `.gitignore`.
-
-3. Compile the smart contracts:
-
+2. **Start development server**:
 ```bash
-npm run compile
-```
+   npm run dev
+   ```
 
-## Deploying the contracts
+3. **Access the application**:
+   - Main DApp: `http://localhost:5173/`
+   - Dashboard: `http://localhost:5173/dashboard`
 
-To fix the errors you're seeing, you need to deploy the Vault Factory contract to the Sepolia network:
+## Architecture Benefits
 
-1. Get some Sepolia ETH from a faucet like https://sepoliafaucet.com/
+### Simplified Structure
+- **Single Application**: No separation between marketing and functionality
+- **Direct Access**: Users land directly in the DApp
+- **Streamlined UX**: Clean, focused user experience
 
-2. Make sure your `.env` file contains your private key and Sepolia RPC URL
+### Comprehensive Dashboard
+- **Overview**: At-a-glance statistics and recent activity
+- **Quick Actions**: Easy access to main features
+- **Visual Design**: Modern dark theme with purple accents
 
-3. Deploy the contract with:
+## Routes
 
-```bash
-# Enable script execution in PowerShell if needed
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-
-# Then run the deployment script
-npx hardhat run scripts/deploy.ts --network sepolia
-```
-
-4. After deployment, update the contract address in `src/utils/contracts.ts`:
-
-```typescript
-// Update this with your deployed contract address
-export const VAULT_FACTORY_ADDRESS = 'YOUR_DEPLOYED_CONTRACT_ADDRESS' as const
-```
+### Main Routes
+- `/` - Dashboard (default)
+- `/dashboard` - Dashboard overview
+- `/my-vaults` - View and manage vaults
+- `/create-vault` - Create new vault
+- `/wallet` - Wallet management
+- `/wallet/:address` - Individual wallet details
 
 ## Development
 
-Run the development server:
+### Adding New Features
+- **Dashboard widgets**: Update `Dashboard.tsx`
+- **DApp functionality**: Update components in `src/components/`
+- **Routing**: Update `App.tsx` for new routes
 
-```bash
-npm run dev
-```
+### Styling
+- Dark theme with purple accents throughout
+- Responsive design for all screen sizes
+- Consistent UI patterns
 
-Open [http://localhost:3000](http://localhost:3000) to view the app in your browser.
+## Contributing
 
-## Usage
-
-1. Connect your wallet to the application
-2. Create a new vault by selecting either time-based or price-based locking
-3. Deposit ETH into your vault
-4. Monitor your vaults and withdraw when conditions are met
-
-## Smart Contracts
-
-The application uses two main smart contracts:
-
-1. **VaultFactory**: A factory contract for creating new vaults
-2. **TimeCapsuleVault**: The actual vault contract that holds ETH with time or price conditions
-
-### Contract Architecture
-
-- **VaultFactory.sol**
-  - Creates new vault instances
-  - Keeps track of vaults created by users
-  - Allows removal of empty, unlocked vaults
-
-- **TimeCapsuleVault.sol**
-  - Stores ETH deposits
-  - Enforces time-lock or price-lock conditions
-  - Uses Chainlink price feeds for ETH/USD price data
-  - Allows withdrawals when conditions are met
-
-## Troubleshooting
-
-### Error: Vault factory contract not deployed at the specified address
-
-This error occurs because the frontend is trying to interact with a contract that doesn't exist at the specified address. Solutions:
-
-1. Deploy the contract as described in the "Deploying the contracts" section
-2. Update the contract address in `src/utils/contracts.ts` with your deployed contract address
-3. Ensure you're connected to the Sepolia testnet in your wallet
-
-### Error: The contract function "latestRoundData" returned no data ("0x")
-
-This error occurs when the Chainlink price feed contract can't be accessed. Solutions:
-
-1. Make sure you're connected to the Sepolia testnet in your wallet
-2. Ensure the Chainlink price feed address in `src/utils/contracts.ts` is correct for Sepolia testnet
-
-### PowerShell Execution Policy Errors
-
-If you see errors about script execution being disabled:
-
-```
-File cannot be loaded because running scripts is disabled on this system.
-```
-
-Run this command in PowerShell before executing any scripts:
-
-```
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-```
-
-## Contract Deployment Guide
-
-To successfully deploy the contracts:
-
-1. Get Sepolia testnet ETH:
-   - Visit https://sepoliafaucet.com/ or another Sepolia faucet
-   - Request ETH for your deployment wallet
-
-2. Configure your environment:
-   - Create a `.env` file based on `.env.example`
-   - Add your Sepolia RPC URL (from Alchemy or Infura)
-   - Add your private key (with 0x prefix)
-
-3. Compile contracts:
-   ```bash
-   npx hardhat compile
-   ```
-
-4. In PowerShell, enable script execution:
-   ```bash
-   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-   ```
-
-5. Deploy contracts:
-   ```bash
-   node scripts/deploy.ts
-   ```
-
-6. Update the contract address:
-   - Copy the deployed contract address from the terminal
-   - Update the VAULT_FACTORY_ADDRESS in src/utils/contracts.ts
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly
+5. Submit a pull request
 
 ## License
 
-MIT
+MIT License - see LICENSE file for details

@@ -11,9 +11,6 @@ const createRpcClient = (endpoints: string[]): PublicClient => {
       {
         retryCount: 3,
         retryDelay: 1000,
-        onRetry: (error, attempt) => {
-          console.warn(`RPC request failed, retrying (${attempt}/3):`, error.message)
-        },
       }
     ),
   })
@@ -60,8 +57,8 @@ export class RateLimiter {
   }
 }
 
-// Global rate limiter instance
-export const globalRateLimiter = new RateLimiter(8, 1000) // 8 requests per second
+// Global rate limiter instance - reasonable rate limiting for Alchemy
+export const globalRateLimiter = new RateLimiter(3, 1000) // 3 requests per second
 
 // Wrapper for RPC calls with rate limiting
 export const rateLimitedRpcCall = async <T>(
@@ -75,11 +72,13 @@ export const rateLimitedRpcCall = async <T>(
     } catch (error: any) {
       const isRateLimitError = error.message?.includes('rate limit') || 
                               error.message?.includes('429') ||
-                              error.message?.includes('Too Many Requests')
+                              error.message?.includes('Too Many Requests') ||
+                              error.message?.includes('compute units per second') ||
+                              error.code === 429
       
       if (isRateLimitError && attempt < retries) {
-        const delay = Math.pow(2, attempt) * 1000 // Exponential backoff
-        console.warn(`Rate limit hit, retrying in ${delay}ms (attempt ${attempt}/${retries})`)
+        const delay = Math.pow(2, attempt) * 1000 // Normal exponential backoff (1s, 2s, 4s)
+        console.warn(`Alchemy rate limit hit, retrying in ${delay}ms (attempt ${attempt}/${retries})`)
         await new Promise(resolve => setTimeout(resolve, delay))
         continue
       }

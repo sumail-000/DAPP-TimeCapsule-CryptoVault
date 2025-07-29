@@ -178,16 +178,16 @@ const VaultPerformanceTracker = ({
       <StatGroup mb={6}>
         <Stat>
           <StatLabel>ETH Price Change</StatLabel>
-          <StatNumber>${performanceMetrics.currentPrice.toFixed(2)}</StatNumber>
+          <StatNumber>{isNaN(performanceMetrics.currentPrice) ? '$0.00' : `$${performanceMetrics.currentPrice.toFixed(2)}`}</StatNumber>
           <StatHelpText>
             <StatArrow type={performanceMetrics.priceChange >= 0 ? 'increase' : 'decrease'} />
-            {performanceMetrics.priceChangePercent.toFixed(2)}%
+            {isNaN(performanceMetrics.priceChangePercent) ? '0.00' : performanceMetrics.priceChangePercent.toFixed(2)}%
           </StatHelpText>
         </Stat>
         
         <Stat>
           <StatLabel>Time Elapsed</StatLabel>
-          <StatNumber>{formatTimeElapsed(performanceMetrics.timeElapsed)}</StatNumber>
+          <StatNumber>{isNaN(performanceMetrics.timeElapsed) ? '0d 0h 0m' : formatTimeElapsed(performanceMetrics.timeElapsed)}</StatNumber>
           <StatHelpText>
             Since vault creation
           </StatHelpText>
@@ -195,7 +195,7 @@ const VaultPerformanceTracker = ({
         
         <Stat>
           <StatLabel>Progress</StatLabel>
-          <StatNumber>{performanceMetrics.progressPercent.toFixed(0)}%</StatNumber>
+          <StatNumber>{isNaN(performanceMetrics.progressPercent) ? '0' : performanceMetrics.progressPercent.toFixed(0)}%</StatNumber>
           <StatHelpText>
             {isPriceLocked ? 'Toward price target' : 'Toward time unlock'}
           </StatHelpText>
@@ -236,11 +236,11 @@ const VaultPerformanceTracker = ({
               return (
                 <Tr key={snapshot.timestamp}>
                   <Td>{format(new Date(snapshot.timestamp * 1000), 'MMM dd, yyyy')}</Td>
-                  <Td isNumeric>${snapshot.price.toFixed(2)}</Td>
+                  <Td isNumeric>{isNaN(snapshot.price) ? '$0.00' : `$${snapshot.price.toFixed(2)}`}</Td>
                   <Td isNumeric>
                     <HStack justifyContent="flex-end" spacing={1}>
                       <Text color={priceChange >= 0 ? 'green.500' : 'red.500'}>
-                        {priceChange >= 0 ? '↑' : '↓'} {priceChangePercent.toFixed(2)}%
+                        {priceChange >= 0 ? '↑' : '↓'} {isNaN(priceChangePercent) ? '0.00' : priceChangePercent.toFixed(2)}%
                       </Text>
                     </HStack>
                   </Td>

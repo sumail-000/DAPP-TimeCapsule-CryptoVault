@@ -2,12 +2,135 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + React + TS</title>
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    
+    <!-- Cache Control -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    
+    <!-- PWA Meta Tags -->
+    <title>TimeCapsule CryptoVault - Secure Crypto Savings</title>
+    <meta name="description" content="Secure crypto savings with time-locked, price-locked, and goal-based vaults on the blockchain" />
+    <meta name="theme-color" content="#7f5af0" />
+    <meta name="application-name" content="CryptoVault" />
+    <meta name="apple-mobile-web-app-title" content="CryptoVault" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="msapplication-TileColor" content="#7f5af0" />
+    <meta name="msapplication-config" content="/browserconfig.xml" />
+    
+    <!-- Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+    
+    <!-- Apple Touch Icons -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-192x192.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png" />
+    <link rel="apple-touch-icon" sizes="144x144" href="/icons/icon-144x144.png" />
+    <link rel="apple-touch-icon" sizes="120x120" href="/icons/icon-128x128.png" />
+    <link rel="apple-touch-icon" sizes="114x114" href="/icons/icon-128x128.png" />
+    <link rel="apple-touch-icon" sizes="76x76" href="/icons/icon-96x96.png" />
+    <link rel="apple-touch-icon" sizes="72x72" href="/icons/icon-72x72.png" />
+    <link rel="apple-touch-icon" sizes="60x60" href="/icons/icon-72x72.png" />
+    <link rel="apple-touch-icon" sizes="57x57" href="/icons/icon-72x72.png" />
+    
+    <!-- Standard Favicons -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon.png" />
+    <link rel="shortcut icon" href="/favicon.png" />
+    
+
+    
+    <!-- Preload Critical Resources -->
+    <link rel="dns-prefetch" href="//eth-sepolia.g.alchemy.com" />
+    <link rel="dns-prefetch" href="//api.etherscan.io" />
+    
+    <!-- Security Headers -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https: wss:; font-src 'self' data:;" />
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    
+    <!-- Service Worker Registration -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          // Force unregister old service workers
+          navigator.serviceWorker.getRegistrations().then(registrations => {
+            for(let registration of registrations) {
+              registration.unregister();
+            }
+          });
+          
+          navigator.serviceWorker.register('/sw.js?v=1.0.1')
+            .then((registration) => {
+              console.log('SW registered: ', registration);
+              
+              // Check for updates
+              registration.addEventListener('updatefound', () => {
+                const newWorker = registration.installing;
+                if (newWorker) {
+                  newWorker.addEventListener('statechange', () => {
+                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                      // New content available, refresh to update
+                      if (confirm('New version available! Refresh to update?')) {
+                        newWorker.postMessage({ type: 'SKIP_WAITING' });
+                        window.location.reload();
+                      }
+                    }
+                  });
+                }
+              });
+            })
+            .catch((registrationError) => {
+              console.log('SW registration failed: ', registrationError);
+            });
+        });
+        
+        // Listen for service worker updates
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          window.location.reload();
+        });
+      }
+      
+      // Install prompt handling
+      let deferredPrompt;
+      window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        
+        // Show custom install banner
+        const installBanner = document.createElement('div');
+        installBanner.innerHTML = `
+          <div style="position: fixed; top: 0; left: 0; right: 0; background: #7f5af0; color: white; padding: 10px; text-align: center; z-index: 1000;">
+            <span>Install CryptoVault for the best experience!</span>
+            <button id="install-button" style="margin-left: 10px; background: white; color: #7f5af0; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer;">Install</button>
+            <button id="dismiss-button" style="margin-left: 10px; background: transparent; color: white; border: 1px solid white; padding: 5px 10px; border-radius: 4px; cursor: pointer;">Dismiss</button>
+          </div>
+        `;
+        document.body.appendChild(installBanner);
+        
+        document.getElementById('install-button').addEventListener('click', () => {
+          installBanner.remove();
+          deferredPrompt.prompt();
+          deferredPrompt.userChoice.then((choiceResult) => {
+            console.log('User choice:', choiceResult.outcome);
+            deferredPrompt = null;
+          });
+        });
+        
+        document.getElementById('dismiss-button').addEventListener('click', () => {
+          installBanner.remove();
+        });
+      });
+      
+      // Track app install
+      window.addEventListener('appinstalled', (evt) => {
+        console.log('App installed');
+      });
+    </script>
   </body>
 </html>

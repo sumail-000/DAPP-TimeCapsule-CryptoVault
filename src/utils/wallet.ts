@@ -11,7 +11,7 @@ export interface WalletData {
 export const createWallet = async (network: string): Promise<WalletData> => {
   const wallet = ethers.Wallet.createRandom();
   const provider = new ethers.JsonRpcProvider(
-    SUPPORTED_NETWORKS.find((n: Network) => n.id === network)?.rpc
+    SUPPORTED_NETWORKS.find((n: Network) => n.id === network)?.rpc[0]
   );
   
   const connectedWallet = wallet.connect(provider);
@@ -28,7 +28,7 @@ export const createWallet = async (network: string): Promise<WalletData> => {
 export const importWallet = async (privateKey: string, network: string): Promise<WalletData> => {
   const wallet = new ethers.Wallet(privateKey);
   const provider = new ethers.JsonRpcProvider(
-    SUPPORTED_NETWORKS.find((n: Network) => n.id === network)?.rpc
+    SUPPORTED_NETWORKS.find((n: Network) => n.id === network)?.rpc[0]
   );
   
   const connectedWallet = wallet.connect(provider);
@@ -44,7 +44,7 @@ export const importWallet = async (privateKey: string, network: string): Promise
 
 export const getWalletBalance = async (address: string, network: string): Promise<string> => {
   const provider = new ethers.JsonRpcProvider(
-    SUPPORTED_NETWORKS.find((n: Network) => n.id === network)?.rpc
+    SUPPORTED_NETWORKS.find((n: Network) => n.id === network)?.rpc[0]
   );
   
   const balance = await provider.getBalance(address);
@@ -65,7 +65,7 @@ export const estimateGasFee = async (
   amount: string
 ): Promise<GasEstimate> => {
   const provider = new ethers.JsonRpcProvider(
-    SUPPORTED_NETWORKS.find((n: Network) => n.id === fromWallet.network)?.rpc
+    SUPPORTED_NETWORKS.find((n: Network) => n.id === fromWallet.network)?.rpc[0]
   );
   
   const wallet = new ethers.Wallet(fromWallet.privateKey, provider);
@@ -111,7 +111,7 @@ export const sendTransaction = async (
   useMaxAmount: boolean = false
 ): Promise<string> => {
   const provider = new ethers.JsonRpcProvider(
-    SUPPORTED_NETWORKS.find((n: Network) => n.id === fromWallet.network)?.rpc
+    SUPPORTED_NETWORKS.find((n: Network) => n.id === fromWallet.network)?.rpc[0]
   );
   
   const wallet = new ethers.Wallet(fromWallet.privateKey, provider);

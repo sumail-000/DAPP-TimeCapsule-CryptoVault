@@ -12,7 +12,7 @@ export const SUPPORTED_NETWORKS: Network[] = [
     id: 'sepolia',
     name: 'Sepolia Testnet',
     rpc: [
-      'https://eth-sepolia.g.alchemy.com/v2/djNT8rHHwMM8vB0WBkTCZTrxq-lZ1SUo', // Alchemy (primary)
+      'https://eth-sepolia.g.alchemy.com/v2/ekP1XVsADtC9NnTUOeltxC55HCm2BEBx', // Alchemy (primary)
       'https://sepolia.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161', // Infura (fallback)
       'https://rpc.sepolia.org', // Public RPC (fallback)
       'https://eth-sepolia.public.blastapi.io', // BlastAPI (last resort)

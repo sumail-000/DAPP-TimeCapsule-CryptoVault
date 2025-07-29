@@ -5,6 +5,7 @@ import { VAULT_FACTORY_ADDRESS, ETH_USD_PRICE_FEED, CHAINLINK_PRICE_FEED_ABI } f
 import { getContractError } from '../utils/errors'
 import { SUPPORTED_NETWORKS } from '../constants/networks'
 import { rateLimitedRpcCall, getSepoliaClient } from '../utils/rpc'
+import { useToast } from '@chakra-ui/react'
 
 export interface VaultData {
   address: string;
@@ -33,12 +34,15 @@ export const useVault = () => {
   const [currentEthPrice, setCurrentEthPrice] = useState<bigint>(0n)
   const [provider, setProvider] = useState<ethers.JsonRpcProvider | null>(null);
   const [signer, setSigner] = useState<ethers.Wallet | null>(null);
+  const [isWalletInitialized, setIsWalletInitialized] = useState(false);
+  const toast = useToast();
 
   // Track vaults that have been auto-withdrawn in this session
   const autoWithdrawnVaults = useRef<Set<string>>(new Set());
 
   // Set up provider and wallet when component mounts
   useEffect(() => {
+    const initializeWallet = async () => {
     const savedWallets = localStorage.getItem('wallets');
     if (savedWallets) {
       const parsedWallets = JSON.parse(savedWallets);
@@ -49,16 +53,47 @@ export const useVault = () => {
         // Create provider based on network
         const network = SUPPORTED_NETWORKS.find(n => n.id === wallet.network);
         if (network) {
-          // Use the first RPC endpoint as primary
+          try {
+            // Create provider and signer first (these don't require network calls)
           const provider = new ethers.JsonRpcProvider(network.rpc[0]);
+            const signer = new ethers.Wallet(wallet.privateKey, provider);
+            
+            // Set provider and signer immediately
           setProvider(provider);
-          
-          // Create signer
-          const signer = new ethers.Wallet(wallet.privateKey, provider);
-          setSigner(signer);
+            setSigner(signer);
+            
+            // Mark wallet as initialized immediately - we have enough to work
+            setIsWalletInitialized(true);
+            
+            console.log('Wallet setup completed (basic):', {
+              address: wallet.address,
+              network: wallet.network,
+              rpcUrl: network.rpc[0],
+              signerAddress: signer.address,
+            });
+            
+            // Test connection in background with rate limiting (optional)
+            rateLimitedRpcCall(async () => {
+              try {
+                await provider.getBlockNumber();
+                console.log('Provider connection test successful');
+              } catch (testError) {
+                console.warn('Provider connection test failed (non-critical):', testError);
+                // Don't fail initialization - manual operations can still work
+              }
+            });
+            
+            // Wallet initialization complete
+          } catch (error) {
+            console.error('Error initializing wallet:', error);
+            setError('Failed to initialize wallet connection');
         }
       }
     }
+    }
+    };
+
+    initializeWallet();
   }, []);
 
   // Fetch current ETH price periodically
@@ -79,13 +114,14 @@ export const useVault = () => {
         });
       } catch (err) {
         console.error('Error fetching current ETH price:', err);
-        setError('Unable to fetch ETH/USD price from Chainlink. Please make sure you are connected to Sepolia network.');
+        // Don't set error for price feed issues as they're not critical for core functionality
+        // setError('Unable to fetch ETH/USD price from Chainlink. Please make sure you are connected to Sepolia network.');
       }
     };
 
     if (provider) {
       fetchCurrentEthPrice();
-      const interval = setInterval(fetchCurrentEthPrice, 30000); // Update every 30 seconds instead of 10
+      const interval = setInterval(fetchCurrentEthPrice, 60000); // Update every 60 seconds to reduce rate limiting
       return () => clearInterval(interval);
     }
   }, [provider]);
@@ -107,8 +143,8 @@ export const useVault = () => {
         
         // Get lock status
         const lockStatus = await vaultContract.getLockStatus();
-        // lockStatus: [locked, currentPrice, timeRemaining, isPriceBased, isGoalBased, currentAmount, goalAmount, progressPercentage, unlockReason]
-        const [locked, currentPrice, timeRemaining, isPriceBased, isGoalBased, currentAmount, goalAmount, progressPercentage, unlockReason] = lockStatus;
+        // lockStatus: [isLocked, currentPrice, timeRemaining, isPriceBased, isGoalBased, currentAmount, goalAmount, progressPercentage, unlockReason]
+        const [isLocked, currentPrice, timeRemaining, isPriceBased, isGoalBased, currentAmount, goalAmount, progressPercentage, unlockReason] = lockStatus;
         
         // Get current price
         const currentPriceResult = await priceFeed.latestRoundData();
@@ -118,7 +154,7 @@ export const useVault = () => {
 
         const isPriceLocked = isPriceBased;
         const isGoalLocked = isGoalBased;
-        const isTimeLocked = locked && !isPriceLocked && !isGoalLocked;
+        const isTimeLocked = isLocked && !isPriceLocked && !isGoalLocked;
         let lockType: 'time' | 'price' | 'goal' = 'time';
         if (isPriceLocked) lockType = 'price';
         if (isGoalLocked) lockType = 'goal';
@@ -138,13 +174,42 @@ export const useVault = () => {
           isPriceLocked,
           isGoalLocked,
           lockType,
-          isLocked: locked,
+          isLocked: isLocked,
           unlockReason: unlockReason,
         };
       });
     } catch (err) {
-      console.error(`Error fetching details for vault ${vaultAddress}:`, err);
+      // Only filter out specific errors that definitely indicate old/incompatible vaults
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      if (errorMessage.includes('missing revert data') && 
+          errorMessage.includes('CALL_EXCEPTION')) {
+        // These are definitely old vault contracts - skip them
       return null;
+      }
+      
+      // For other errors (rate limits, network issues), log but don't filter out the vault
+      // This prevents vaults from disappearing due to temporary issues
+      console.warn(`Temporary error fetching vault ${vaultAddress}, will retry:`, errorMessage);
+      
+      // Return a minimal vault object to keep it visible
+      return {
+        address: vaultAddress,
+        balance: 0n,
+        unlockTime: 0n,
+        targetPrice: 0n,
+        goalAmount: 0n,
+        currentAmount: 0n,
+        progressPercentage: 0,
+        currentPrice: 0n,
+        remainingTime: 0,
+        creator: '',
+        isTimeLocked: false,
+        isPriceLocked: false,
+        isGoalLocked: false,
+        lockType: 'time' as const, // Use a valid lockType
+        isLocked: true,
+        unlockReason: 'Loading vault data...',
+      };
     }
   }, [provider, selectedWallet]);
 
@@ -185,7 +250,19 @@ export const useVault = () => {
             return Boolean(vault);
           }
 
-          setVaults(fetchedVaultDetails.filter(isVaultData).filter(vault => vault.balance > 0n));
+          // Only update vaults if we successfully fetched some data
+          const validVaults = fetchedVaultDetails.filter(isVaultData);
+          if (validVaults.length > 0) {
+            // Filter out vaults with 0 balance AND no loading state (truly empty/withdrawn vaults)
+            const activeVaults = validVaults.filter(vault => 
+              vault.balance > 0n || vault.unlockReason === 'Loading vault data...'
+            );
+            setVaults(activeVaults);
+          } else if (vaultAddresses.length === 0) {
+            // No vaults exist for this user
+            setVaults([]);
+          }
+          // If no valid vaults but we have addresses, keep existing vaults (rate limit/network issue scenario)
         });
       } catch (err) {
         console.error('Error loading all vaults:', err);
@@ -328,90 +405,350 @@ export const useVault = () => {
   };
 
   const withdraw = async (vaultAddress: string): Promise<boolean> => {
-    if (!signer || !provider || !selectedWallet) {
+    console.log('=== WITHDRAWAL FUNCTION STARTED ===');
+    console.log('Parameters:', { 
+      vaultAddress, 
+      signer: !!signer, 
+      provider: !!provider, 
+      selectedWallet: !!selectedWallet,
+      isWalletInitialized 
+    });
+    
+    // For manual withdrawal, try to work even if global initialization had rate limit issues
+    if (!selectedWallet) {
+      console.log('Early exit: No wallet selected');
       setError('No wallet selected');
       return false;
     }
 
+    // If signer/provider are missing but we have selectedWallet, try to recreate them
+    let workingSigner = signer;
+    let workingProvider = provider;
+    
+    if (!workingSigner || !workingProvider) {
+      console.log('Missing signer/provider, attempting to recreate from selectedWallet...');
+      try {
+        const network = SUPPORTED_NETWORKS.find(n => n.id === selectedWallet.network);
+        if (!network) {
+          throw new Error('Network not found for selected wallet');
+        }
+        
+        // Try multiple RPC endpoints for resilience
+        let rpcError;
+        for (const rpcUrl of network.rpc) {
+          try {
+            workingProvider = new ethers.JsonRpcProvider(rpcUrl);
+            workingSigner = new ethers.Wallet(selectedWallet.privateKey, workingProvider);
+            console.log('Successfully created working provider with RPC:', rpcUrl);
+            break;
+          } catch (err) {
+            console.warn(`Failed to create provider with RPC ${rpcUrl}:`, err);
+            rpcError = err;
+            continue;
+          }
+        }
+        
+        if (!workingSigner || !workingProvider) {
+          throw rpcError || new Error('All RPC endpoints failed');
+        }
+      } catch (error) {
+        console.error('Failed to recreate signer/provider:', error);
+        setError('Unable to connect to blockchain. Please try again later.');
+        return false;
+      }
+    }
+
+    console.log('Wallet components check passed');
     setIsLoading(true);
     setError(null);
 
     try {
-      const vaultContract = new ethers.Contract(vaultAddress, TimeCapsuleVaultABI, signer);
+      console.log('Starting withdrawal process for vault:', vaultAddress);
+      
+      // Test signer connection
+      try {
+        const signerAddress = await workingSigner.getAddress();
+        console.log('Using signer address:', signerAddress);
+      } catch (signerError) {
+        console.error('Signer error:', signerError);
+        throw new Error('Signer is not properly connected');
+      }
+      
+      try {
+        const network = await workingProvider.getNetwork();
+        console.log('Network:', network);
+      } catch (networkError) {
+        console.error('Network error:', networkError);
+        throw new Error('Provider is not properly connected');
+      }
+
+      // Test basic RPC call
+      try {
+        const blockNumber = await workingProvider.getBlockNumber();
+        console.log('Current block number:', blockNumber);
+      } catch (rpcError) {
+        console.error('RPC error:', rpcError);
+        throw new Error('Unable to connect to blockchain network');
+      }
+
+      const vaultContract = new ethers.Contract(vaultAddress, TimeCapsuleVaultABI, workingSigner);
 
       // Check if vault is unlocked
-      const lockStatus = await vaultContract.getLockStatus();
+      console.log('Checking vault lock status...');
+      let lockStatus;
+      try {
+        lockStatus = await vaultContract.getLockStatus();
+        console.log('Lock status:', lockStatus);
+      } catch (lockStatusError) {
+        console.error('Lock status error:', lockStatusError);
+        throw new Error('Unable to read vault status - check if vault address is correct');
+      }
+      
       if (lockStatus[0]) {
         throw new Error(`Vault is still locked: ${lockStatus[8]}`); // unlockReason is at index 8
       }
 
+      // Verify we're on the correct network
+      const network = await workingProvider.getNetwork();
+      console.log('Current network:', network);
+      if (network.chainId !== 11155111n) { // Sepolia chainId
+        throw new Error('Please switch to Sepolia testnet to withdraw from this vault');
+      }
+
       // Check if vault has balance
-      const balance = await provider.getBalance(vaultAddress);
+      console.log('Checking vault balance...');
+      const balance = await workingProvider.getBalance(vaultAddress);
+      console.log('Vault balance:', ethers.formatEther(balance), 'ETH');
+      
       if (balance === 0n) {
         throw new Error('Vault has no balance to withdraw');
       }
 
       console.log(`Withdrawing ${ethers.formatEther(balance)} ETH from vault ${vaultAddress}`);
 
-      // Withdraw funds
-      const tx = await vaultContract.withdraw();
+      // Check gas estimation
+      console.log('Estimating gas for withdrawal...');
+      const gasEstimate = await vaultContract.withdraw.estimateGas();
+      console.log('Estimated gas:', gasEstimate.toString());
+
+      // Get current gas price
+      const gasPrice = await workingProvider.getFeeData();
+      console.log('Current gas price:', ethers.formatUnits(gasPrice.gasPrice || 0n, 'gwei'), 'gwei');
+
+      // Withdraw funds with explicit gas settings
+      const tx = await rateLimitedRpcCall(async () => {
+        return await vaultContract.withdraw({
+          gasLimit: (gasEstimate * 120n) / 100n, // Add 20% buffer
+          maxFeePerGas: gasPrice.maxFeePerGas,
+          maxPriorityFeePerGas: gasPrice.maxPriorityFeePerGas,
+        });
+      });
+      
       console.log('Withdrawal transaction submitted:', tx.hash);
+      console.log('Transaction details:', {
+        hash: tx.hash,
+        from: tx.from,
+        to: tx.to,
+        gasLimit: tx.gasLimit?.toString(),
+        maxFeePerGas: tx.maxFeePerGas?.toString(),
+        maxPriorityFeePerGas: tx.maxPriorityFeePerGas?.toString(),
+      });
 
       // Wait for transaction to be mined
-      const receipt = await tx.wait();
-      console.log('Withdrawal transaction confirmed:', receipt);
+      console.log('Waiting for transaction confirmation...');
+      const receipt = await rateLimitedRpcCall(async () => {
+        return await tx.wait();
+      });
+      console.log('Withdrawal transaction confirmed:', {
+        hash: receipt.hash,
+        blockNumber: receipt.blockNumber,
+        gasUsed: receipt.gasUsed?.toString(),
+        status: receipt.status,
+      });
+
+      // Verify the withdrawal actually happened
+      const newBalance = await workingProvider.getBalance(vaultAddress);
+      console.log('Vault balance after withdrawal:', ethers.formatEther(newBalance), 'ETH');
+
+      if (newBalance > 0n) {
+        console.warn('Warning: Vault still has balance after withdrawal attempt');
+      }
 
       // Update vaults list (remove this vault)
       setVaults(prevVaults => prevVaults.filter(v => v.address !== vaultAddress));
 
       return true;
     } catch (err) {
+      console.error('=== WITHDRAWAL ERROR CAUGHT ===');
       console.error('Error withdrawing from vault:', err);
+      console.error('Error details:', {
+        name: (err as any).name,
+        message: (err as any).message,
+        code: (err as any).code,
+        data: (err as any).data,
+        transaction: (err as any).transaction,
+      });
+      
       const errorMessage = getContractError(err);
+      console.log('Processed error message:', errorMessage);
       setError(errorMessage);
       return false;
     } finally {
+      console.log('=== WITHDRAWAL FUNCTION ENDED ===');
       setIsLoading(false);
     }
   };
 
   // Poll for unlocked vaults and auto-withdraw
   useEffect(() => {
-    if (!signer || !provider || !selectedWallet || vaults.length === 0) return;
+    if (!isWalletInitialized || !signer || !provider || !selectedWallet || vaults.length === 0) {
+      // Only log this occasionally to reduce console spam
+      if (Math.random() < 0.1) {
+        console.log('Auto-withdrawal not ready:', {
+          isWalletInitialized,
+          hasSigner: !!signer,
+          hasProvider: !!provider,
+          hasSelectedWallet: !!selectedWallet,
+          vaultsCount: vaults.length
+        });
+      }
+      return;
+    }
+
+    console.log('Starting auto-withdrawal polling...');
 
     const interval = setInterval(async () => {
+      console.log('Checking for unlocked vaults to auto-withdraw...');
+      
       for (const vault of vaults) {
-        // Only attempt withdrawal if vault is unlocked, has balance, and hasn't been auto-withdrawn
-        if (!vault.isLocked && vault.balance > 0n && !autoWithdrawnVaults.current.has(vault.address)) {
+        // Skip if already auto-withdrawn or has no balance
+        if (autoWithdrawnVaults.current.has(vault.address)) {
+          console.log(`Vault ${vault.address} already auto-withdrawn, skipping`);
+          continue;
+        }
+        
+        if (vault.balance === 0n) {
+          console.log(`Vault ${vault.address} has no balance, skipping auto-withdrawal`);
+          continue;
+        }
+        
           try {
-            console.log(`Attempting auto-withdrawal from vault ${vault.address}`);
+          console.log(`Checking vault ${vault.address} for auto-withdrawal (balance: ${ethers.formatEther(vault.balance)} ETH)`);
             
             await rateLimitedRpcCall(async () => {
-              // Double-check the vault status before withdrawing
+            // Check the actual vault status in real-time
               const vaultContract = new ethers.Contract(vault.address, TimeCapsuleVaultABI, provider);
               const lockStatus = await vaultContract.getLockStatus();
+            const currentBalance = await provider.getBalance(vault.address);
+            
+            console.log(`Vault ${vault.address} real-time status:`, {
+              locked: lockStatus[0],
+              unlockReason: lockStatus[8],
+              currentBalance: ethers.formatEther(currentBalance),
+              cachedBalance: ethers.formatEther(vault.balance)
+            });
               
-              // Only proceed if the vault is actually unlocked
-              if (!lockStatus[0]) { // locked = false
-                await withdraw(vault.address);
+            // Only proceed if the vault is actually unlocked and has balance
+            if (!lockStatus[0] && currentBalance > 0n) {
+              console.log(`Vault ${vault.address} confirmed unlocked, proceeding with auto-withdrawal`);
+              const success = await withdraw(vault.address);
+              
+              if (success) {
                 autoWithdrawnVaults.current.add(vault.address);
-                console.log(`Auto-withdrawal successful for vault ${vault.address}`);
+                console.log(`🎉 AUTO-WITHDRAWAL SUCCESSFUL! ${ethers.formatEther(currentBalance)} ETH withdrawn from vault ${vault.address}`);
+                
+                // Show success toast notification
+                toast({
+                  title: "Auto-withdrawal successful! 🎉",
+                  description: `${ethers.formatEther(currentBalance)} ETH has been automatically withdrawn from your vault.`,
+                  status: "success",
+                  duration: 5000,
+                  isClosable: true,
+                  position: "top-right",
+                });
               } else {
-                console.log(`Vault ${vault.address} is still locked, skipping auto-withdrawal`);
+                console.log(`Auto-withdrawal failed for vault ${vault.address}`);
+                
+                // Show error toast notification
+                toast({
+                  title: "Auto-withdrawal failed",
+                  description: "Failed to automatically withdraw funds. You can try manual withdrawal.",
+                  status: "error",
+                  duration: 5000,
+                  isClosable: true,
+                  position: "top-right",
+                });
+              }
+            } else {
+              console.log(`Vault ${vault.address} is still locked or has no balance, skipping auto-withdrawal`);
               }
             });
           } catch (err) {
-            console.error(`Auto-withdrawal failed for vault ${vault.address}:`, err);
+          console.error(`Auto-withdrawal check failed for vault ${vault.address}:`, err);
             // Don't add to autoWithdrawnVaults so it will retry next poll
             // But add a small delay to prevent spam
             await new Promise(resolve => setTimeout(resolve, 5000));
           }
         }
-      }
-    }, 60000); // Check every 60 seconds instead of 30 to reduce rate limiting
+    }, 120000); // Check every 2 minutes for auto-withdrawal
 
-    return () => clearInterval(interval);
-  }, [signer, provider, selectedWallet, vaults]);
+    return () => {
+      console.log('Stopping auto-withdrawal polling...');
+      clearInterval(interval);
+    };
+  }, [isWalletInitialized, signer, provider, selectedWallet, vaults]);
+
+  // Refresh vault data more frequently to keep UI updated
+  useEffect(() => {
+    if (!isWalletInitialized || !signer || !provider || !selectedWallet || vaults.length === 0) {
+      return;
+    }
+
+    console.log('Starting vault data refresh polling...');
+    
+    const refreshInterval = setInterval(async () => {
+      console.log('Refreshing vault data for UI...');
+      try {
+        // Re-fetch all vaults to update their status
+        await rateLimitedRpcCall(async () => {
+          const factoryContract = new ethers.Contract(VAULT_FACTORY_ADDRESS, VaultFactoryABI, provider);
+          const vaultAddresses = await factoryContract.getUserVaults(selectedWallet.address);
+          
+          if (vaultAddresses) {
+            const fetchedVaultDetails = await Promise.all(
+              vaultAddresses.map(fetchVaultDetails)
+            );
+
+            function isVaultData(vault: VaultData | null): vault is VaultData {
+              return Boolean(vault);
+            }
+
+            // Only update vaults if we successfully fetched some data
+            const validVaults = fetchedVaultDetails.filter(isVaultData);
+            if (validVaults.length > 0) {
+              // Filter out vaults with 0 balance AND no loading state (truly empty/withdrawn vaults)
+              const activeVaults = validVaults.filter(vault => 
+                vault.balance > 0n || vault.unlockReason === 'Loading vault data...'
+              );
+              setVaults(activeVaults);
+            } else if (vaultAddresses.length === 0) {
+              // No vaults exist for this user
+              setVaults([]);
+            }
+            // If no valid vaults but we have addresses, keep existing vaults (rate limit/network issue scenario)
+          }
+        });
+      } catch (err) {
+        console.error('Error refreshing vault data:', err);
+        // Don't throw - just log and continue
+      }
+    }, 60000); // Refresh every 60 seconds
+
+    return () => {
+      console.log('Stopping vault data refresh polling...');
+      clearInterval(refreshInterval);
+    };
+  }, [isWalletInitialized, signer, provider, selectedWallet, vaults.length, fetchVaultDetails]);
 
   return {
     isLoading,
@@ -423,5 +760,6 @@ export const useVault = () => {
     withdraw,
     selectedWallet,
     setSelectedWallet,
+    isWalletInitialized,
   };
 }; 

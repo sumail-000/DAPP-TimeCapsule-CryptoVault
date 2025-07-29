@@ -5,6 +5,8 @@ import { VaultData } from '../hooks/useVault';
 import { PriceChart, CountdownTimer, VaultPerformanceTracker } from './visualization';
 import { useLocation, useNavigate } from 'react-router-dom';
 import React, { useState } from 'react';
+import { CopyIcon, InfoOutlineIcon } from '@chakra-ui/icons';
+import { Tooltip, Progress, HStack, Input, IconButton } from '@chakra-ui/react';
 
 interface VaultDetailsModalProps {
   isOpen: boolean;
@@ -46,7 +48,7 @@ export const VaultDetailsModal = ({
   unlockReason,
 }: VaultDetailsModalProps) => {
   const toast = useToast();
-  const { withdraw, deposit } = useVault();
+  const { withdraw, deposit, isWalletInitialized } = useVault();
   const navigate = useNavigate();
   const [isWithdrawing, setIsWithdrawing] = React.useState(false);
   const [autoWithdrawStarted, setAutoWithdrawStarted] = React.useState(false);
@@ -54,13 +56,21 @@ export const VaultDetailsModal = ({
   const [isDepositing, setIsDepositing] = useState(false);
 
   React.useEffect(() => {
-    // If vault is unlocked, has balance, and not already withdrawing, start withdrawal
-    if (!isLocked && balance > 0n && !isWithdrawing && !autoWithdrawStarted) {
+    // If vault is unlocked, has balance, wallet is initialized, and not already withdrawing, start withdrawal
+    if (!isLocked && balance > 0n && isWalletInitialized && !isWithdrawing && !autoWithdrawStarted) {
+      console.log('Modal: Starting automatic withdrawal for vault:', vault);
+      console.log('Modal: Vault balance:', formatEther(balance), 'ETH');
+      console.log('Modal: Vault locked status:', isLocked);
+      console.log('Modal: Wallet initialized:', isWalletInitialized);
+      
       setIsWithdrawing(true);
       setAutoWithdrawStarted(true);
+      
       (async () => {
         try {
-          await withdraw(vault);
+          const success = await withdraw(vault);
+          
+          if (success) {
           toast({
             title: 'Success',
             description: 'Funds withdrawn successfully',
@@ -71,7 +81,11 @@ export const VaultDetailsModal = ({
           if (onWithdrawComplete) onWithdrawComplete();
           onClose();
           navigate('/wallet');
+          } else {
+            throw new Error('Withdrawal failed - check console for details');
+          }
         } catch (error) {
+          console.error('Modal: Withdrawal error:', error);
           toast({
             title: 'Error',
             description: error instanceof Error ? error.message : 'Failed to withdraw funds',
@@ -83,8 +97,18 @@ export const VaultDetailsModal = ({
           setIsWithdrawing(false);
         }
       })();
+    } else if (!isWalletInitialized && !isLocked && balance > 0n) {
+      console.log('Modal: Wallet not yet initialized, waiting...');
+    } else if (isWithdrawing) {
+      console.log('Modal: Withdrawal already in progress...');
+    } else if (autoWithdrawStarted) {
+      console.log('Modal: Auto-withdrawal already started...');
+    } else if (isLocked) {
+      console.log('Modal: Vault is still locked...');
+    } else if (balance === 0n) {
+      console.log('Modal: Vault has no balance...');
     }
-  }, [isLocked, balance, isWithdrawing, autoWithdrawStarted, withdraw, vault, toast, onClose, navigate, onWithdrawComplete]);
+  }, [isLocked, balance, isWalletInitialized, isWithdrawing, autoWithdrawStarted, withdraw, vault, toast, onClose, navigate, onWithdrawComplete]);
 
   if (!vault || vaultIndex === null) {
     return null;
@@ -133,9 +157,22 @@ export const VaultDetailsModal = ({
                   <VStack align="start" spacing={5} pb={4}>
                     <Box width="full">
                       <Text fontSize="sm" color="gray.600" fontWeight="medium">Vault Address</Text>
-                      <Text fontSize="md" fontWeight="semibold" noOfLines={1} color="blue.800">
-                        {vault}
-                      </Text>
+                      <HStack spacing={2}>
+                        <Text fontSize="md" fontWeight="semibold" noOfLines={1} color="blue.800">
+                          {vault}
+                        </Text>
+                        <Tooltip label="Copy address" hasArrow>
+                          <IconButton
+                            aria-label="Copy address"
+                            icon={<CopyIcon />}
+                            size="sm"
+                            onClick={() => {
+                              navigator.clipboard.writeText(vault);
+                              toast({ title: 'Address copied!', status: 'info', duration: 2000 });
+                            }}
+                          />
+                        </Tooltip>
+                      </HStack>
                     </Box>
                     <Box width="full">
                       <Text fontSize="sm" color="gray.600" fontWeight="medium">Balance</Text>
@@ -148,8 +185,37 @@ export const VaultDetailsModal = ({
                       <Box width="full" mt={2} mb={2} p={3} bg="gray.50" borderRadius="md" border="1px solid" borderColor="gray.200">
                         <VStack align="stretch" spacing={2}>
                           <Text fontSize="md" color="gray.700" fontWeight="semibold">Deposit More ETH</Text>
+                          <HStack spacing={2} mb={2}>
+                            {[0.01, 0.1, 0.5].map((amt) => (
+                              <Button
+                                key={amt}
+                                size="sm"
+                                variant="outline"
+                                colorScheme="purple"
+                                onClick={() => setDepositAmount((prev) => (prev ? (Number(prev) + amt).toString() : amt.toString()))}
+                              >
+                                +{amt} ETH
+                              </Button>
+                            ))}
+                          </HStack>
+                          {/* Suggest amount needed for goal lock */}
+                          {isGoalLocked && goalAmount !== undefined && currentAmount !== undefined && progressPercentage !== undefined && progressPercentage < 100 && (
+                            <HStack spacing={2} mb={2}>
+                              <Text fontSize="sm" color="green.700">
+                                You need {isNaN(Number(goalAmount) - Number(currentAmount)) ? '' : ((Number(goalAmount) - Number(currentAmount)) / 1e18)} more ETH to reach your goal.
+                              </Text>
+                              <Button
+                                size="xs"
+                                colorScheme="green"
+                                variant="outline"
+                                onClick={() => setDepositAmount(((Number(goalAmount) - Number(currentAmount)) / 1e18).toString())}
+                              >
+                                Add Exact
+                              </Button>
+                            </HStack>
+                          )}
                           <Box display="flex" gap={2}>
-                            <input
+                            <Input
                               type="number"
                               min="0"
                               step="0.001"
@@ -157,7 +223,6 @@ export const VaultDetailsModal = ({
                               onChange={e => setDepositAmount(e.target.value)}
                               placeholder="Amount in ETH"
                               disabled={isDepositing}
-                              style={{ flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #ccc' }}
                             />
                             <Button
                               colorScheme="purple"
@@ -189,17 +254,32 @@ export const VaultDetailsModal = ({
                     )}
                     <Box width="full">
                       <Text fontSize="sm" color="gray.600" fontWeight="medium">Lock Type</Text>
-                      <Badge
-                        colorScheme={isTimeLocked ? 'blue' : isPriceLocked ? 'purple' : isGoalLocked ? 'green' : 'gray'}
-                        variant="solid"
-                        px={3}
-                        py={1}
-                        borderRadius="full"
-                        fontSize="0.9em"
-                        mt={1}
-                      >
-                        {isTimeLocked ? 'TIME LOCK' : isPriceLocked ? 'PRICE LOCK' : isGoalLocked ? 'GOAL LOCK' : 'UNKNOWN'}
-                      </Badge>
+                      <HStack spacing={2} mt={1}>
+                        <Badge
+                          colorScheme={isTimeLocked ? 'blue' : isPriceLocked ? 'purple' : isGoalLocked ? 'green' : 'gray'}
+                          variant="solid"
+                          px={3}
+                          py={1}
+                          borderRadius="full"
+                          fontSize="0.9em"
+                        >
+                          {isTimeLocked ? 'TIME LOCK' : isPriceLocked ? 'PRICE LOCK' : isGoalLocked ? 'GOAL LOCK' : 'UNKNOWN'}
+                        </Badge>
+                        <Tooltip
+                          label={
+                            isTimeLocked
+                              ? 'Assets unlock at a specific time.'
+                              : isPriceLocked
+                              ? 'Assets unlock when a price target is reached.'
+                              : isGoalLocked
+                              ? 'Assets unlock when a deposit goal is reached.'
+                              : 'Unknown lock type.'
+                          }
+                          hasArrow
+                        >
+                          <InfoOutlineIcon color="gray.500" />
+                        </Tooltip>
+                      </HStack>
                     </Box>
                     {/* Countdown Timer for Time Locks */}
                     {isTimeLocked && (
@@ -243,22 +323,82 @@ export const VaultDetailsModal = ({
                       <Box width="full" mt={2} mb={2} p={3} bg="green.50" borderRadius="md" border="1px solid" borderColor="green.200">
                         <VStack align="stretch" spacing={2}>
                           <Text fontSize="md" color="green.700" fontWeight="semibold">Goal Progress</Text>
-                          <Text fontSize="sm" color="gray.600">Goal:</Text>
-                          <Text fontSize="lg" fontWeight="bold" color="green.800">
-                            {formattedGoalUsd ? `$${formattedGoalUsd}` : `${Number(goalAmount) / 1e18} ETH`}
-                          </Text>
-                          <Text fontSize="sm" color="gray.600">Current:</Text>
-                          <Text fontSize="lg" fontWeight="bold" color="green.800">
-                            {Number(currentAmount) / 1e18} ETH
-                          </Text>
-                          <Text fontSize="sm" color="gray.600">Progress:</Text>
-                          <Text fontSize="lg" fontWeight="bold" color="green.800">
-                            {progressPercentage}%
+                          <HStack width="full" justify="space-between">
+                            <Text fontSize="sm" color="gray.600">Goal:</Text>
+                            <Text fontSize="lg" fontWeight="bold" color="green.800">
+                              {formattedGoalUsd && !isNaN(Number(formattedGoalUsd)) ? `$${formattedGoalUsd}` : `${Number(goalAmount) / 1e18} ETH`}
+                            </Text>
+                          </HStack>
+                          <HStack width="full" justify="space-between">
+                            <Text fontSize="sm" color="gray.600">Current:</Text>
+                            <Text fontSize="lg" fontWeight="bold" color="green.800">
+                              {isNaN(Number(currentAmount) / 1e18) ? '0' : (Number(currentAmount) / 1e18)} ETH
+                            </Text>
+                          </HStack>
+                          <Progress value={isNaN(progressPercentage) ? 0 : progressPercentage} colorScheme="green" borderRadius="md" height="20px" />
+                          <HStack width="full" justify="space-between">
+                            <Text fontSize="sm" color="gray.600">Progress:</Text>
+                            <Text fontSize="lg" fontWeight="bold" color="green.800">
+                              {isNaN(progressPercentage) ? '0' : progressPercentage}%
+                            </Text>
+                          </HStack>
+                          <Text fontSize="sm" color="gray.600">
+                            {progressPercentage < 100
+                              ? `You need ${(Number(goalAmount) - Number(currentAmount)) / 1e18} more ETH to unlock.`
+                              : 'Goal reached! Vault will unlock soon.'}
                           </Text>
                         </VStack>
                       </Box>
                     )}
-                    {/* Instead of Withdraw button, show auto-withdraw message */}
+                    {/* Manual Withdraw Button for Unlocked Vaults */}
+                    {!isLocked && balance > 0n && (
+                      <Box width="full" mt={4}>
+                        <Button
+                          colorScheme="green"
+                          size="lg"
+                          width="full"
+                          onClick={async () => {
+                            setIsWithdrawing(true);
+                            try {
+                              console.log('Manual withdrawal triggered for vault:', vault);
+                              const success = await withdraw(vault);
+                              if (success) {
+                                toast({
+                                  title: 'Success',
+                                  description: 'Funds withdrawn successfully',
+                                  status: 'success',
+                                  duration: 5000,
+                                  isClosable: true,
+                                });
+                                if (onWithdrawComplete) onWithdrawComplete();
+                                onClose();
+                                navigate('/wallet');
+                              } else {
+                                throw new Error('Manual withdrawal failed - check console for details');
+                              }
+                            } catch (error) {
+                              console.error('Manual withdrawal error:', error);
+                              toast({
+                                title: 'Error',
+                                description: error instanceof Error ? error.message : 'Failed to withdraw funds',
+                                status: 'error',
+                                duration: 5000,
+                                isClosable: true,
+                              });
+                            } finally {
+                              setIsWithdrawing(false);
+                            }
+                          }}
+                          isLoading={isWithdrawing}
+                          loadingText="Withdrawing..."
+                        >
+                          Withdraw {formatEther(balance)} ETH
+                        </Button>
+                      </Box>
+                    )}
+                    
+                    {/* Auto-withdraw message for locked vaults */}
+                    {isLocked && (
                     <Box
                       width="full"
                       mt={4}
@@ -270,9 +410,10 @@ export const VaultDetailsModal = ({
                       textAlign="center"
                     >
                       <Text fontSize="md" color="purple.700" fontWeight="semibold">
-                        Withdrawals are now automatic! Assets will be sent to your wallet as soon as the vault unlocks.
+                          Withdrawals are automatic! Assets will be sent to your wallet as soon as the vault unlocks.
                       </Text>
                     </Box>
+                    )}
                   </VStack>
                 </TabPanel>
                 {/* Analytics Tab */}
